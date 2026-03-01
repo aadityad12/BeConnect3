@@ -7,6 +7,8 @@ Description-Content-Type: text/markdown
 Requires-Dist: dbus-next>=0.2.3
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0.0; extra == "dev"
+Provides-Extra: ui
+Requires-Dist: streamlit>=1.33.0; extra == "ui"
 
 # BeConnect Pi Sender (MVP)
 
@@ -93,6 +95,31 @@ beconnect-pi broadcast start --foreground
 - Manufacturer ID: `0x1234`
 - Advertisement metadata: `[severity:1][alertIdHash:4][fetchedAt:4]`
 - Frame format: `[chunkIndex:2][totalChunks:2][payload:N]`
+
+## Streamlit Operator UI
+
+This repo now includes a lightweight UI wrapper at `pi_sender/streamlit_app.py`.
+It uses the existing `beconnect_pi` model/storage/broadcast logic; no new data layer is introduced.
+
+Install UI dependency:
+
+```bash
+cd pi_sender
+pip install -e .[ui]
+```
+
+Run the UI:
+
+```bash
+cd pi_sender
+streamlit run streamlit_app.py
+```
+
+What you can do in the UI:
+- Create/save alerts
+- Publish selected alert to `current_alert.json`
+- Start/stop BLE broadcaster
+- View broadcaster status + log tail
 
 ## Notes
 - Android receivers still need to open Receiver Mode and tap a beacon.

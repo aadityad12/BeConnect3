@@ -2,3 +2,6 @@ dbus-next>=0.2.3
 
 [dev]
 pytest>=8.0.0
+
+[ui]
+streamlit>=1.33.0

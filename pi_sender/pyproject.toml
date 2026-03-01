@@ -16,6 +16,9 @@ dependencies = [
 dev = [
   "pytest>=8.0.0",
 ]
+ui = [
+  "streamlit>=1.33.0",
+]
 
 [project.scripts]
 beconnect-pi = "beconnect_pi.cli:main"
