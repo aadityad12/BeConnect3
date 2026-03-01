@@ -23,6 +23,20 @@ class AlertDao {
     await pruneOldAlerts();
   }
 
+  /// Returns true if an alert with this ID is already stored locally.
+  /// [alertId] is the 8-char hex string embedded in the BLE manufacturer data.
+  Future<bool> hasAlert(String alertId) async {
+    final db = await AlertDatabase.database;
+    final rows = await db.query(
+      'alerts',
+      columns: ['alertId'],
+      where: 'alertId = ?',
+      whereArgs: [alertId],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
   /// Returns all alerts ordered by most recently fetched first.
   Future<List<AlertPacket>> fetchAll() async {
     final db = await AlertDatabase.database;

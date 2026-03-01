@@ -8,12 +8,14 @@ class BeaconInfo {
   final String deviceName;
   final String severity;
   final int rssi;
+  final String? alertIdHash; // 8-char hex from manufacturer bytes[1..4]; null if absent
 
   const BeaconInfo({
     required this.device,
     required this.deviceName,
     required this.severity,
     required this.rssi,
+    this.alertIdHash,
   });
 }
 
@@ -28,6 +30,44 @@ class BleScanner {
 
   static final Map<String, BeaconInfo> _beacons = {};
   static StreamSubscription<List<ScanResult>>? _sub;
+
+  /// Parses a BeaconInfo from a ScanResult. Returns null if the result
+  /// does not carry the BeConnect service UUID.
+  static BeaconInfo? _parseResult(ScanResult r) {
+    final hasService = r.advertisementData.serviceUuids
+        .any((g) => g == Guid(serviceUuid));
+    if (!hasService) return null;
+
+    final mfData = r.advertisementData.manufacturerData;
+    String severity = 'Unknown';
+    String? alertIdHash;
+
+    if (mfData.containsKey(manufacturerId)) {
+      final bytes = mfData[manufacturerId]!;
+      if (bytes.isNotEmpty) severity = byteToSeverity(bytes[0]);
+      // Pi protocol: [severity:1][alertIdHash:4][fetchedAt:4]
+      if (bytes.length >= 5) {
+        alertIdHash = bytes
+            .sublist(1, 5)
+            .map((b) => b.toRadixString(16).padLeft(2, '0'))
+            .join();
+      }
+    }
+
+    final name = r.advertisementData.advName.isNotEmpty
+        ? r.advertisementData.advName
+        : r.device.platformName.isNotEmpty
+            ? r.device.platformName
+            : r.device.remoteId.str;
+
+    return BeaconInfo(
+      device: r.device,
+      deviceName: name,
+      severity: severity,
+      rssi: r.rssi,
+      alertIdHash: alertIdHash,
+    );
+  }
 
   static Future<void> startScan() async {
     // On iOS, CBCentralManager briefly reports unknown before settling.
@@ -54,31 +94,8 @@ class BleScanner {
 
     _sub = FlutterBluePlus.onScanResults.listen((results) {
       for (final r in results) {
-        // Secondary filter: confirm our service UUID is present
-        final hasService = r.advertisementData.serviceUuids
-            .any((g) => g == Guid(serviceUuid));
-        if (!hasService) continue;
-
-        // Parse severity from manufacturer data
-        final mfData = r.advertisementData.manufacturerData;
-        String severity = 'Unknown';
-        if (mfData.containsKey(manufacturerId)) {
-          final bytes = mfData[manufacturerId]!;
-          if (bytes.isNotEmpty) severity = byteToSeverity(bytes[0]);
-        }
-
-        final name = r.advertisementData.advName.isNotEmpty
-            ? r.advertisementData.advName
-            : r.device.platformName.isNotEmpty
-                ? r.device.platformName
-                : r.device.remoteId.str;
-
-        _beacons[r.device.remoteId.str] = BeaconInfo(
-          device:     r.device,
-          deviceName: name,
-          severity:   severity,
-          rssi:       r.rssi,
-        );
+        final info = _parseResult(r);
+        if (info != null) _beacons[r.device.remoteId.str] = info;
       }
       _beaconsController.add(List.of(_beacons.values));
     });
@@ -99,5 +116,43 @@ class BleScanner {
   static Future<void> restartScan() async {
     await stopScan();
     await startScan();
+  }
+
+  /// One-shot scan suitable for use in a background isolate.
+  /// Scans for [timeout], collects results, and returns them without
+  /// updating the UI stream.
+  static Future<List<BeaconInfo>> scanForMesh({
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    // Wait for a definitive adapter state (same guard as startScan)
+    var state = FlutterBluePlus.adapterStateNow;
+    if (state == BluetoothAdapterState.unknown ||
+        state == BluetoothAdapterState.turningOn) {
+      state = await FlutterBluePlus.adapterState
+          .where((s) =>
+              s != BluetoothAdapterState.unknown &&
+              s != BluetoothAdapterState.turningOn)
+          .first
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () => FlutterBluePlus.adapterStateNow,
+          );
+    }
+    if (state != BluetoothAdapterState.on) return [];
+
+    final found = <String, BeaconInfo>{};
+    final sub = FlutterBluePlus.onScanResults.listen((results) {
+      for (final r in results) {
+        final info = _parseResult(r);
+        if (info != null) found[r.device.remoteId.str] = info;
+      }
+    });
+
+    await FlutterBluePlus.startScan(
+      withServices: [Guid(serviceUuid)],
+      timeout: timeout,
+    );
+    await sub.cancel();
+    return found.values.toList();
   }
 }

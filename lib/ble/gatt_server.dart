@@ -31,4 +31,12 @@ class GattServer {
     await _channel.invokeMethod<void>('stopAdvertising');
     _running = false;
   }
+
+  /// Stops any current broadcast and starts a fresh one for [alert].
+  /// Use this when the mesh relays a newer alert that should replace
+  /// the currently advertised one.
+  static Future<void> restart(AlertPacket alert) async {
+    if (_running) await stop();
+    await start(alert);
+  }
 }

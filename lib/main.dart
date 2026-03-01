@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
-import 'ui/mode_select_screen.dart';
+import 'service/gateway_background_service.dart';
+import 'ui/home_screen.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Configure (but do not start) the background mesh service before runApp.
+  // The service is started by HomeScreen after permissions are granted.
+  await GatewayBackgroundService.init();
   runApp(const BeConnectApp());
 }
 
@@ -18,7 +22,7 @@ class BeConnectApp extends StatelessWidget {
         colorSchemeSeed: Colors.deepOrange,
         useMaterial3: true,
       ),
-      home: const ModeSelectScreen(),
+      home: const HomeScreen(),
     );
   }
 }

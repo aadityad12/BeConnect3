@@ -21,9 +21,9 @@ Single Flutter app with two operating modes selectable at runtime:
 lib/
 ├── ble_constants.dart              # UUIDs, MANUFACTURER_ID, DEFAULT_CHUNK_SIZE
 ├── ble/
-│   ├── ble_advertiser.dart         # Gateway: BLE advertise metadata
-│   ├── gatt_server.dart            # Gateway: serve alert packet over GATT
-│   ├── ble_scanner.dart            # Receiver: scan + filter; defines BeaconInfo
+│   ├── ble_advertiser.dart         # Thin delegate → forwards to GattServer
+│   ├── gatt_server.dart            # MethodChannel bridge to native (start/stop advertising + GATT)
+│   ├── ble_scanner.dart            # Receiver: scan + filter; defines BeaconInfo; scanForMesh() for background
 │   ├── gatt_client.dart            # Receiver: connect + chunked read (async/await)
 │   └── chunk_utils.dart            # Chunk/reassemble; encode/decode frame format
 ├── network/
@@ -32,9 +32,9 @@ lib/
 ├── data/
 │   ├── alert_packet.dart           # Data model + JSON serialization (json_serializable)
 │   ├── alert_database.dart         # SQLite DB singleton (sqflite)
-│   └── alert_dao.dart              # insert, pruneOldAlerts (keeps last 20)
+│   └── alert_dao.dart              # insert, hasAlert, fetchAll, pruneOldAlerts (keeps last 20)
 ├── service/
-│   └── gateway_background_service.dart  # Keeps BLE advertising alive in background (flutter_background_service)
+│   └── gateway_background_service.dart  # Background service: BLE advertising + gossip mesh loop (every 5 min)
 ├── utils/
 │   └── permissions.dart                 # requestBlePermissions() — called from ModeSelectScreen
 ├── ui/
@@ -109,6 +109,15 @@ Open in Android Studio or VS Code with the Flutter extension. Ensure the Flutter
 - **Android** Min SDK: **26**. Target SDK: **34**.
 - **iOS** Deployment target: **14.0**.
 
+## Native Layer (Platform Channel)
+
+BLE advertising and the GATT server are implemented natively, not in Dart. `GattServer` is a MethodChannel bridge that calls `com.beconnect.beconnect/ble` with two methods: `startAdvertising({alertJson, severityByte})` and `stopAdvertising`.
+
+- **Android:** `android/app/src/main/kotlin/com/beconnect/beconnect/MainActivity.kt` — uses `BluetoothLeAdvertiser` + `BluetoothGattServer`. Chunks the JSON payload at **508 bytes** (512 MTU − 4-byte header). Tracks per-device requested chunk index in `pendingChunkIndex`.
+- **iOS:** `ios/Runner/AppDelegate.swift` — uses `CBPeripheralManager`. Same 508-byte chunk size. Starts advertising (`CBAdvertisementDataServiceUUIDsKey` + `CBAdvertisementDataLocalNameKey: "BeConnect"`) only after `peripheralManagerDidUpdateState` fires `.poweredOn`.
+
+`BleAdvertiser` is a thin Dart delegate that just calls through to `GattServer` and exists only as a named abstraction.
+
 ## BLE Architecture Details
 
 ### Constants (`ble_constants.dart`)
@@ -117,7 +126,7 @@ const serviceUuid      = '0000BCBC-0000-1000-8000-00805F9B34FB';
 const alertCharUuid    = '0000BCB1-0000-1000-8000-00805F9B34FB'; // read: chunked alert data
 const controlCharUuid  = '0000BCB2-0000-1000-8000-00805F9B34FB'; // write: requested chunk index
 const manufacturerId   = 0x1234;
-const defaultChunkSize = 17; // conservative pre-MTU-negotiation size
+const defaultChunkSize = 17; // receiver-side default before MTU negotiation; native gateway uses 508
 ```
 
 ### Advertising payload (31-byte limit)
@@ -137,8 +146,10 @@ Uses `flutter_blue_plus` `AdvertiseData` with `serviceUuid` + manufacturer-speci
 
 `GattClient` uses `async`/`await` with `StreamController`/`Completer` for callback-to-future bridging. `GATT_ERROR 133` on Android on first connect is common — retry once after 600ms.
 
-### Background advertising
-`GatewayBackgroundService` wraps BLE advertise + GATT server using `flutter_background_service` with a persistent foreground notification on Android (`foregroundServiceType: connectedDevice`) and a background task on iOS (limited — iOS may suspend after ~3 min unless the `bluetooth-peripheral` background mode is enabled in `Info.plist`).
+### Background service + gossip mesh
+`GatewayBackgroundService` uses `flutter_background_service` with a persistent foreground notification on Android (`foregroundServiceType: connectedDevice`) and a background task on iOS (limited — iOS may suspend after ~3 min unless the `bluetooth-peripheral` background mode is enabled in `Info.plist`).
+
+It also implements an **infect-and-forward gossip mesh**: every 5 minutes (and once immediately on start) it calls `BleScanner.scanForMesh()`, checks each beacon's `alertIdHash` against the local DB via `AlertDao.hasAlert()`, downloads any unknown alert via `GattClient.downloadAlert()`, persists it, and re-broadcasts it via `GattServer.start()`. Only one new alert is relayed per cycle to avoid flooding.
 
 Start/stop via:
 ```dart
@@ -204,10 +215,9 @@ Demo fallback: `demo_alerts.dart` provides hardcoded packets with `verified = fa
 
 ## MVP Scope Boundaries
 
-**In scope:** Gateway fetch → advertise → GATT serve; Receiver scan → download → display → SQLite (last 20 alerts); Demo mode; single-hop BLE; Android + iOS.
+**In scope:** Gateway fetch → advertise → GATT serve; Receiver scan → download → display → SQLite (last 20 alerts); Demo mode; gossip mesh relay; Android + iOS.
 
 **Explicitly out of scope:**
-- Multi-hop BLE mesh routing
 - Cryptographic PKI / signature verification beyond `verified` boolean
 - User-generated alert messages
 - Real-time continuous sync
