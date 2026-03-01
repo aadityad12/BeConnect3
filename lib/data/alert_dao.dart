@@ -17,6 +17,7 @@ class AlertDao {
         'sourceUrl':    alert.sourceUrl,
         'verified':     alert.verified ? 1 : 0,
         'fetchedAt':    alert.fetchedAt,
+        'pinned':       alert.pinned ? 1 : 0,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -37,10 +38,13 @@ class AlertDao {
     return rows.isNotEmpty;
   }
 
-  /// Returns all alerts ordered by most recently fetched first.
+  /// Returns all alerts: pinned first, then by most recently fetched.
   Future<List<AlertPacket>> fetchAll() async {
     final db = await AlertDatabase.database;
-    final rows = await db.query('alerts', orderBy: 'fetchedAt DESC');
+    final rows = await db.query(
+      'alerts',
+      orderBy: 'pinned DESC, fetchedAt DESC',
+    );
     return rows
         .map((row) => AlertPacket(
               alertId:      row['alertId'] as String,
@@ -51,8 +55,20 @@ class AlertDao {
               sourceUrl:    row['sourceUrl'] as String,
               verified:     (row['verified'] as int) == 1,
               fetchedAt:    row['fetchedAt'] as int,
+              pinned:       (row['pinned'] as int? ?? 0) == 1,
             ))
         .toList();
+  }
+
+  /// Toggles the pinned state of an alert.
+  Future<void> setPinned(String alertId, {required bool pinned}) async {
+    final db = await AlertDatabase.database;
+    await db.update(
+      'alerts',
+      {'pinned': pinned ? 1 : 0},
+      where: 'alertId = ?',
+      whereArgs: [alertId],
+    );
   }
 
   /// Deletes a single alert by its unique ID.

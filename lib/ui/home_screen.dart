@@ -104,28 +104,54 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // ── Delete alert ────────────────────────────────────────────────────────────
+  // ── Alert actions ────────────────────────────────────────────────────────────
 
-  /// Deletes [alert] from the local database and removes it from the list.
-  ///
-  /// Business rule: the most recently received alert (index 0) must never be
-  /// deleted. This method is only ever called for index > 0.
   Future<void> _deleteAlert(AlertPacket alert) async {
-    // Optimistic UI update — remove immediately so the list stays in sync
-    // with what the Dismissible already animated away.
     setState(() => _alerts.removeWhere((a) => a.alertId == alert.alertId));
-
     await _dao.deleteAlert(alert.alertId);
+  }
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Alert deleted'),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
+  Future<void> _togglePin(AlertPacket alert) async {
+    final newPinned = !alert.pinned;
+    await _dao.setPinned(alert.alertId, pinned: newPinned);
+    await _loadAlerts();
+  }
+
+  void _showAlertContextMenu(AlertPacket alert, bool isNewest) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _AlertContextMenu(
+        alert: alert,
+        isNewest: isNewest,
+        onPin: () {
+          Navigator.pop(context);
+          _togglePin(alert);
+        },
+        onDelete: isNewest
+            ? null
+            : () {
+                Navigator.pop(context);
+                _showDeleteConfirmation(alert);
+              },
+      ),
+    );
+  }
+
+  void _showDeleteConfirmation(AlertPacket alert) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (_) => _DeleteConfirmDialog(
+        alert: alert,
+        onConfirm: () {
+          Navigator.pop(context);
+          _deleteAlert(alert);
+        },
+        onCancel: () => Navigator.pop(context),
+      ),
+    );
   }
 
   // ── Foreground BLE scan ─────────────────────────────────────────────────────
@@ -326,28 +352,21 @@ class _HomeScreenState extends State<HomeScreen> {
                     delegate: SliverChildBuilderDelegate(
                       (_, i) {
                         final alert = _alerts[i];
-                        final card = _AlertCard(
+                        // The newest non-pinned alert (index 0 after sort) is
+                        // the one that cannot be deleted.
+                        final isNewest = i == 0;
+                        return _AlertCard(
+                          key: ValueKey(alert.alertId),
                           alert: alert,
-                          isNewest: i == 0,
-                          onDelete: i == 0 ? null : () => _deleteAlert(alert),
+                          isNewest: isNewest,
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
                               builder: (_) => AlertDetailScreen(alert: alert),
                             ),
                           ),
-                        );
-
-                        // Index 0 is the most recently received alert —
-                        // business rule prohibits deleting it.
-                        if (i == 0) return card;
-
-                        return Dismissible(
-                          key: ValueKey(alert.alertId),
-                          direction: DismissDirection.endToStart,
-                          background: const _DeleteBackground(),
-                          onDismissed: (_) => _deleteAlert(alert),
-                          child: card,
+                          onLongPress: () =>
+                              _showAlertContextMenu(alert, isNewest),
                         );
                       },
                       childCount: _alerts.length,
@@ -508,14 +527,15 @@ class _EmptyState extends StatelessWidget {
 class _AlertCard extends StatelessWidget {
   final AlertPacket alert;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
   final bool isNewest;
-  final VoidCallback? onDelete;
 
   const _AlertCard({
+    super.key,
     required this.alert,
     required this.onTap,
+    required this.onLongPress,
     this.isNewest = false,
-    this.onDelete,
   });
 
   String _formatAge() {
@@ -550,6 +570,7 @@ class _AlertCard extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap: onTap,
+          onLongPress: onLongPress,
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Row(
@@ -591,10 +612,10 @@ class _AlertCard extends StatelessWidget {
                                 style: TextStyle(
                                     color: Colors.white54, fontSize: 10)),
                           ],
-                          if (isNewest) ...[
+                          if (alert.pinned) ...[
                             const SizedBox(width: 6),
                             const Icon(Icons.push_pin,
-                                size: 11, color: Colors.white38),
+                                size: 11, color: Colors.white54),
                           ],
                           const Spacer(),
                           Text(
@@ -617,31 +638,9 @@ class _AlertCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (onDelete != null) ...[
-                  const SizedBox(width: 4),
-                  // Delete button — tap is consumed here and does NOT bubble
-                  // up to the parent InkWell, so navigation is unaffected.
-                  SizedBox(
-                    width: 32,
-                    height: 32,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(8),
-                        onTap: onDelete,
-                        child: const Icon(
-                          Icons.delete_outline_rounded,
-                          size: 18,
-                          color: Colors.white38,
-                        ),
-                      ),
-                    ),
-                  ),
-                ] else ...[
-                  const SizedBox(width: 4),
-                  const Icon(Icons.arrow_forward_ios,
-                      size: 14, color: Colors.white38),
-                ],
+                const SizedBox(width: 4),
+                const Icon(Icons.arrow_forward_ios,
+                    size: 14, color: Colors.white38),
               ],
             ),
           ),
@@ -651,23 +650,253 @@ class _AlertCard extends StatelessWidget {
   }
 }
 
-// ─── Swipe-to-delete background ───────────────────────────────────────────────
+// ─── Alert context menu (long-press bottom sheet) ─────────────────────────────
 
-class _DeleteBackground extends StatelessWidget {
-  const _DeleteBackground();
+class _AlertContextMenu extends StatelessWidget {
+  final AlertPacket alert;
+  final bool isNewest;
+  final VoidCallback onPin;
+  final VoidCallback? onDelete;
+
+  const _AlertContextMenu({
+    required this.alert,
+    required this.isNewest,
+    required this.onPin,
+    this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      // Mirror the margin from _AlertCard so the background aligns perfectly.
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.red.shade700,
-        borderRadius: BorderRadius.circular(16),
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF0D0F1A).withAlpha(230),
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(24)),
+            border: const Border(
+              top: BorderSide(color: Colors.white12),
+              left: BorderSide(color: Colors.white12),
+              right: BorderSide(color: Colors.white12),
+            ),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Drag handle
+                const SizedBox(height: 12),
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Alert headline preview
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 3,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: SeverityColors.main(alert.severity),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          alert.headline,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Divider(color: Colors.white12, height: 1),
+                const SizedBox(height: 8),
+
+                // Pin / Unpin option
+                _ContextMenuItem(
+                  icon: alert.pinned
+                      ? Icons.push_pin_outlined
+                      : Icons.push_pin,
+                  label: alert.pinned ? 'Unpin alert' : 'Pin alert',
+                  onTap: onPin,
+                ),
+
+                // Delete option — only for non-newest alerts
+                if (onDelete != null) ...[
+                  const Divider(color: Colors.white12, height: 1,
+                      indent: 20, endIndent: 20),
+                  _ContextMenuItem(
+                    icon: Icons.delete_outline_rounded,
+                    label: 'Delete alert',
+                    color: Colors.redAccent,
+                    onTap: onDelete!,
+                  ),
+                ],
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        ),
       ),
-      alignment: Alignment.centerRight,
-      padding: const EdgeInsets.only(right: 24),
-      child: const Icon(Icons.delete_rounded, color: Colors.white, size: 28),
+    );
+  }
+}
+
+class _ContextMenuItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _ContextMenuItem({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.color = Colors.white,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, size: 22, color: color),
+            const SizedBox(width: 16),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Delete confirmation dialog ───────────────────────────────────────────────
+
+class _DeleteConfirmDialog extends StatelessWidget {
+  final AlertPacket alert;
+  final VoidCallback onConfirm;
+  final VoidCallback onCancel;
+
+  const _DeleteConfirmDialog({
+    required this.alert,
+    required this.onConfirm,
+    required this.onCancel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF0D0F1A).withAlpha(230),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white12),
+            ),
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.delete_outline_rounded,
+                        color: Colors.redAccent, size: 22),
+                    SizedBox(width: 10),
+                    Text(
+                      'Delete Alert',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Are you sure you want to delete\n"${alert.headline}"?',
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'This action cannot be undone.',
+                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: onCancel,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white70,
+                          side: const BorderSide(color: Colors.white24),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: onConfirm,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.red.shade800,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        child: const Text('Delete'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

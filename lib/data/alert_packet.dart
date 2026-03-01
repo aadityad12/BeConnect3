@@ -12,6 +12,8 @@ class AlertPacket {
   final String sourceUrl;
   final bool verified;       // true only if fetched from NWS
   final int fetchedAt;       // Unix epoch seconds
+  @JsonKey(defaultValue: false)
+  final bool pinned;
 
   const AlertPacket({
     required this.alertId,
@@ -22,6 +24,7 @@ class AlertPacket {
     required this.sourceUrl,
     required this.verified,
     required this.fetchedAt,
+    this.pinned = false,
   });
 
   factory AlertPacket.fromJson(Map<String, dynamic> json) =>

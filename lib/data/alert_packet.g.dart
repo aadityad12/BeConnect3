@@ -15,6 +15,7 @@ AlertPacket _$AlertPacketFromJson(Map<String, dynamic> json) => AlertPacket(
       sourceUrl: json['sourceUrl'] as String,
       verified: json['verified'] as bool,
       fetchedAt: (json['fetchedAt'] as num).toInt(),
+      pinned: json['pinned'] as bool? ?? false,
     );
 
 Map<String, dynamic> _$AlertPacketToJson(AlertPacket instance) =>
@@ -27,4 +28,5 @@ Map<String, dynamic> _$AlertPacketToJson(AlertPacket instance) =>
       'sourceUrl': instance.sourceUrl,
       'verified': instance.verified,
       'fetchedAt': instance.fetchedAt,
+      'pinned': instance.pinned,
     };
