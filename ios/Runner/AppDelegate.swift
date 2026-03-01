@@ -41,13 +41,13 @@ import CoreBluetooth
             guard let self = self else { return }
             switch call.method {
             case "startAdvertising":
-                guard let args       = call.arguments as? [String: Any],
-                      let alertJson  = args["alertJson"] as? String,
-                      let sevInt     = args["severityByte"] as? Int else {
+                guard let args      = call.arguments as? [String: Any],
+                      let typedData = args["alertBytes"] as? FlutterStandardTypedData,
+                      let sevInt    = args["severityByte"] as? Int else {
                     result(FlutterError(code: "INVALID_ARGS", message: nil, details: nil))
                     return
                 }
-                self.startGateway(alertJson: alertJson, severityByte: UInt8(sevInt))
+                self.startGateway(alertBytes: [UInt8](typedData.data), severityByte: UInt8(sevInt))
                 result(nil)
             case "stopAdvertising":
                 self.stopGateway()
@@ -62,14 +62,14 @@ import CoreBluetooth
 
     // MARK: – Gateway start / stop
 
-    private func startGateway(alertJson: String, severityByte: UInt8) {
-        let jsonBytes = Array(alertJson.utf8)
-        let total = Int(ceil(Double(jsonBytes.count) / Double(payloadSize)))
+    private func startGateway(alertBytes: [UInt8], severityByte: UInt8) {
+        // alertBytes arrives pre-compressed (gzip) from Dart — no UTF-8 conversion needed.
+        let total = Int(ceil(Double(alertBytes.count) / Double(payloadSize)))
 
         alertChunks = (0 ..< max(total, 1)).map { i in
             let start = i * payloadSize
-            let end   = min(start + payloadSize, jsonBytes.count)
-            let payload = Array(jsonBytes[start ..< end])
+            let end   = min(start + payloadSize, alertBytes.count)
+            let payload = Array(alertBytes[start ..< end])
             var frame: [UInt8] = [
                 UInt8((i >> 8) & 0xFF), UInt8(i & 0xFF),
                 UInt8((total >> 8) & 0xFF), UInt8(total & 0xFF)

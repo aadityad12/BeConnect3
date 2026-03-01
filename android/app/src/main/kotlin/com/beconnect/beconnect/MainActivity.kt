@@ -38,9 +38,9 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "startAdvertising" -> {
-                        val alertJson   = call.argument<String>("alertJson") ?: ""
+                        val alertBytes   = call.argument<ByteArray>("alertBytes") ?: byteArrayOf()
                         val severityByte = (call.argument<Int>("severityByte") ?: 4).toByte()
-                        startGateway(alertJson, severityByte, result)
+                        startGateway(alertBytes, severityByte, result)
                     }
                     "stopAdvertising" -> stopGateway(result)
                     else -> result.notImplemented()
@@ -61,7 +61,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun startGateway(alertJson: String, severityByte: Byte, result: MethodChannel.Result) {
+    private fun startGateway(alertBytes: ByteArray, severityByte: Byte, result: MethodChannel.Result) {
         val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
         val adapter = bluetoothManager.adapter
 
@@ -75,12 +75,12 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        val jsonBytes = alertJson.toByteArray(Charsets.UTF_8)
-        val total = Math.ceil(jsonBytes.size.toDouble() / PAYLOAD_SIZE).toInt().coerceAtLeast(1)
+        // alertBytes arrives pre-compressed (gzip) from Dart — no UTF-8 conversion needed.
+        val total = Math.ceil(alertBytes.size.toDouble() / PAYLOAD_SIZE).toInt().coerceAtLeast(1)
         alertChunks = (0 until total).map { i ->
             val start   = i * PAYLOAD_SIZE
-            val end     = minOf(start + PAYLOAD_SIZE, jsonBytes.size)
-            val payload = jsonBytes.copyOfRange(start, end)
+            val end     = minOf(start + PAYLOAD_SIZE, alertBytes.size)
+            val payload = alertBytes.copyOfRange(start, end)
             byteArrayOf(
                 ((i shr 8) and 0xFF).toByte(), (i and 0xFF).toByte(),
                 ((total shr 8) and 0xFF).toByte(), (total and 0xFF).toByte()

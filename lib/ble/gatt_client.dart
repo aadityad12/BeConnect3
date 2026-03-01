@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../ble_constants.dart';
@@ -69,8 +70,18 @@ class GattClient {
     final data = ChunkUtils.reassemble(chunks, totalChunks);
     if (data == null) throw Exception('Chunk reassembly failed');
 
+    // Auto-detect gzip (magic bytes 0x1f 0x8b = Flutter-sent compressed alert).
+    // Pi sender transmits raw UTF-8 JSON which never starts with these bytes,
+    // so this check gives full backward compatibility with no Pi changes.
+    final Uint8List decoded;
+    if (data.length >= 2 && data[0] == 0x1f && data[1] == 0x8b) {
+      decoded = Uint8List.fromList(gzip.decode(data));
+    } else {
+      decoded = data;
+    }
+
     return AlertPacket.fromJson(
-      jsonDecode(utf8.decode(data)) as Map<String, dynamic>,
+      jsonDecode(utf8.decode(decoded)) as Map<String, dynamic>,
     );
   }
 }

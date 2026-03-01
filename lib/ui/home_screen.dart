@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../ble/ble_scanner.dart';
 import '../ble/gatt_client.dart';
@@ -11,6 +12,9 @@ import '../network/alert_fetcher.dart';
 import '../service/gateway_background_service.dart';
 import '../utils/permissions.dart';
 import 'receiver/alert_detail_screen.dart';
+import 'theme/severity_colors.dart';
+import 'widgets/glass_container.dart';
+import 'widgets/glass_scaffold.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -103,8 +107,6 @@ class _HomeScreenState extends State<HomeScreen> {
   // ── Foreground BLE scan ─────────────────────────────────────────────────────
 
   /// Runs a 15-second foreground scan in the main isolate.
-  /// Same logic as the background mesh routine, but with live UI feedback and
-  /// reliable iOS/Android BLE access (no background isolate limitations).
   Future<void> _runForegroundScan() async {
     if (_scanning) return;
     if (!mounted) return;
@@ -200,99 +202,128 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('BeConnect'),
-        backgroundColor: Colors.deepOrange,
-        foregroundColor: Colors.white,
-        actions: [
-          if (_meshActive)
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: Chip(
-                label: const Text(
-                  'MESH ACTIVE',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 11,
-                  ),
-                ),
-                backgroundColor: Colors.green.shade700,
-                avatar: const Icon(Icons.cell_tower, color: Colors.white, size: 14),
-                padding: EdgeInsets.zero,
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
-          IconButton(
-            icon: _loading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                        color: Colors.white, strokeWidth: 2),
-                  )
-                : const Icon(Icons.cloud_download),
-            tooltip: 'Fetch NWS Alerts',
-            onPressed: _loading ? null : _fetchNws,
-          ),
-          IconButton(
-            icon: const Icon(Icons.science),
-            tooltip: 'Load Demo Alerts',
-            onPressed: _loadDemo,
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
-        onRefresh: _loadAlerts,
-        child: CustomScrollView(
-          slivers: [
-            // Scan status banner — shown while a foreground scan is in progress.
-            if (_scanning || _scanStatus.isNotEmpty)
-              SliverToBoxAdapter(
-                child: _ScanBanner(
-                  status: _scanStatus,
-                  scanning: _scanning,
+      extendBodyBehindAppBar: true,
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            child: AppBar(
+              title: const Text(
+                'BeConnect',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-
-            if (_fetchError != null)
-              SliverToBoxAdapter(
-                child: _ErrorBanner(
-                  message: _fetchError!,
-                  onDismiss: () => setState(() => _fetchError = null),
-                ),
-              ),
-
-            if (_alerts.isEmpty)
-              SliverFillRemaining(
-                child: _EmptyState(scanning: _scanning),
-              )
-            else
-              SliverPadding(
-                padding: const EdgeInsets.all(12),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (_, i) => _AlertCard(
-                      alert: _alerts[i],
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AlertDetailScreen(alert: _alerts[i]),
+              backgroundColor: Colors.white.withAlpha(20),
+              elevation: 0,
+              actions: [
+                if (_meshActive)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Chip(
+                      label: const Text(
+                        'MESH ACTIVE',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
                         ),
                       ),
+                      backgroundColor: const Color(0xFF2E7D32).withAlpha(217),
+                      avatar: const Icon(
+                          Icons.cell_tower, color: Colors.white, size: 14),
+                      side: const BorderSide(color: Colors.white24),
+                      padding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
                     ),
-                    childCount: _alerts.length,
                   ),
+                IconButton(
+                  icon: _loading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2),
+                        )
+                      : const Icon(Icons.cloud_download),
+                  tooltip: 'Fetch NWS Alerts',
+                  onPressed: _loading ? null : _fetchNws,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.science),
+                  tooltip: 'Load Demo Alerts',
+                  onPressed: _loadDemo,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      body: GlassScaffold(
+        child: RefreshIndicator(
+          onRefresh: _loadAlerts,
+          color: const Color(0xFFE64A19),
+          child: CustomScrollView(
+            slivers: [
+              // Space for the glass AppBar + status bar
+              SliverToBoxAdapter(
+                child: SizedBox(
+                  height: MediaQuery.of(context).padding.top + kToolbarHeight + 8,
                 ),
               ),
-          ],
+
+              // Scan status banner
+              if (_scanning || _scanStatus.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: _ScanBanner(
+                    status: _scanStatus,
+                    scanning: _scanning,
+                  ),
+                ),
+
+              if (_fetchError != null)
+                SliverToBoxAdapter(
+                  child: _ErrorBanner(
+                    message: _fetchError!,
+                    onDismiss: () => setState(() => _fetchError = null),
+                  ),
+                ),
+
+              if (_alerts.isEmpty)
+                SliverFillRemaining(
+                  child: _EmptyState(scanning: _scanning),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (_, i) => _AlertCard(
+                        alert: _alerts[i],
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => AlertDetailScreen(alert: _alerts[i]),
+                          ),
+                        ),
+                      ),
+                      childCount: _alerts.length,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
       // FAB for manual re-scan.
       floatingActionButton: FloatingActionButton(
         onPressed: _scanning ? null : _runForegroundScan,
         tooltip: 'Scan for beacons',
-        backgroundColor: _scanning ? Colors.grey : Colors.deepOrange,
+        backgroundColor: _scanning
+            ? Colors.white.withAlpha(30)
+            : const Color(0xFFE64A19).withAlpha(217),
         child: _scanning
             ? const SizedBox(
                 width: 24,
@@ -316,30 +347,37 @@ class _ScanBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (scanning) const LinearProgressIndicator(color: Colors.deepOrange),
-        Container(
-          width: double.infinity,
-          color: Colors.deepOrange.withAlpha(20),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              Icon(Icons.bluetooth_searching,
-                  size: 16, color: Colors.deepOrange.shade700),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  status.isNotEmpty ? status : 'Scanning…',
-                  style: TextStyle(
-                      color: Colors.deepOrange.shade900, fontSize: 13),
-                ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: GlassContainer(
+        blur: true,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        borderRadius: const BorderRadius.all(Radius.circular(12)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (scanning)
+              const LinearProgressIndicator(
+                color: Color(0xFFE64A19),
+                backgroundColor: Colors.white12,
               ),
-            ],
-          ),
+            if (scanning) const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.bluetooth_searching,
+                    size: 16, color: Colors.white70),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    status.isNotEmpty ? status : 'Scanning…',
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
@@ -354,30 +392,31 @@ class _ErrorBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.red.shade50,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.red.shade200),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline, color: Colors.red, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(message,
-                style: const TextStyle(color: Colors.red, fontSize: 13)),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close, size: 16),
-            color: Colors.red,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            onPressed: onDismiss,
-          ),
-        ],
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: GlassContainer(
+        blur: true,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        borderRadius: const BorderRadius.all(Radius.circular(12)),
+        tint: Colors.red.withAlpha(38),
+        borderColor: Colors.red.withAlpha(102),
+        child: Row(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.redAccent, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(message,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13)),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close, size: 16),
+              color: Colors.white54,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              onPressed: onDismiss,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -399,14 +438,14 @@ class _EmptyState extends StatelessWidget {
           Icon(
             scanning ? Icons.bluetooth_searching : Icons.bluetooth_disabled,
             size: 72,
-            color: Colors.grey.shade300,
+            color: Colors.white24,
           ),
           const SizedBox(height: 16),
           Text(
             scanning
                 ? 'Scanning for nearby beacons…'
                 : 'No alerts saved yet.',
-            style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+            style: const TextStyle(color: Colors.white54, fontSize: 16),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
@@ -414,7 +453,7 @@ class _EmptyState extends StatelessWidget {
             scanning
                 ? 'This takes about 15 seconds.'
                 : 'Tap \u25ba to scan for nearby Pi beacons,\nor \u2193 to fetch from NWS.',
-            style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+            style: const TextStyle(color: Colors.white30, fontSize: 13),
             textAlign: TextAlign.center,
           ),
         ],
@@ -431,15 +470,6 @@ class _AlertCard extends StatelessWidget {
 
   const _AlertCard({required this.alert, required this.onTap});
 
-  Color get _severityColor {
-    switch (alert.severity) {
-      case 'Extreme':  return Colors.red.shade700;
-      case 'Severe':   return Colors.orange.shade700;
-      case 'Moderate': return Colors.yellow.shade800;
-      default:         return Colors.grey.shade600;
-    }
-  }
-
   String _formatAge() {
     final age =
         DateTime.now().millisecondsSinceEpoch ~/ 1000 - alert.fetchedAt;
@@ -450,79 +480,95 @@ class _AlertCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    final color = SeverityColors.main(alert.severity);
+    return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: _severityColor.withAlpha(100), width: 1),
+      decoration: BoxDecoration(
+        color: SeverityColors.tint(alert.severity),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: SeverityColors.border(alert.severity)),
+        boxShadow: SeverityColors.hasGlow(alert.severity)
+            ? [
+                BoxShadow(
+                  color: color.withAlpha(64),
+                  blurRadius: 16,
+                  spreadRadius: 1,
+                )
+              ]
+            : null,
       ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 4,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: _severityColor,
-                  borderRadius: BorderRadius.circular(2),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 4,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: _severityColor,
-                            borderRadius: BorderRadius.circular(4),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: color,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              alert.severity.toUpperCase(),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold),
+                            ),
                           ),
-                          child: Text(
-                            alert.severity.toUpperCase(),
+                          if (!alert.verified) ...[
+                            const SizedBox(width: 6),
+                            const Text('DEMO',
+                                style: TextStyle(
+                                    color: Colors.white54, fontSize: 10)),
+                          ],
+                          const Spacer(),
+                          Text(
+                            _formatAge(),
                             style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold),
+                                color: Colors.white54, fontSize: 11),
                           ),
-                        ),
-                        if (!alert.verified) ...[
-                          const SizedBox(width: 6),
-                          Text('DEMO',
-                              style: TextStyle(
-                                  color: Colors.grey.shade500, fontSize: 10)),
                         ],
-                        const Spacer(),
-                        Text(
-                          _formatAge(),
-                          style: TextStyle(
-                              color: Colors.grey.shade500, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      alert.headline,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 14),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        alert.headline,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 4),
-              const Icon(Icons.arrow_forward_ios,
-                  size: 14, color: Colors.grey),
-            ],
+                const SizedBox(width: 4),
+                const Icon(Icons.arrow_forward_ios,
+                    size: 14, color: Colors.white38),
+              ],
+            ),
           ),
         ),
       ),

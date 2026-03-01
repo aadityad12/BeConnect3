@@ -1,19 +1,14 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../../data/alert_packet.dart';
+import '../theme/severity_colors.dart';
+import '../widgets/glass_container.dart';
+import '../widgets/glass_scaffold.dart';
 
 class AlertDetailScreen extends StatelessWidget {
   final AlertPacket alert;
 
   const AlertDetailScreen({super.key, required this.alert});
-
-  Color get _severityColor {
-    switch (alert.severity) {
-      case 'Extreme':  return Colors.red.shade700;
-      case 'Severe':   return Colors.orange.shade700;
-      case 'Moderate': return Colors.yellow.shade700;
-      default:         return Colors.grey;
-    }
-  }
 
   String _formatExpiry() {
     final dt = DateTime.fromMillisecondsSinceEpoch(alert.expires * 1000);
@@ -22,112 +17,132 @@ class AlertDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final color = SeverityColors.main(alert.severity);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Alert Details'),
-        backgroundColor: _severityColor,
-        foregroundColor: Colors.white,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Severity banner
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-              decoration: BoxDecoration(
-                color: _severityColor,
-                borderRadius: BorderRadius.circular(12),
+      extendBodyBehindAppBar: true,
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            child: AppBar(
+              title: const Text(
+                'Alert Details',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.warning_amber_rounded,
-                          color: Colors.white, size: 20),
-                      const SizedBox(width: 6),
-                      Text(
-                        alert.severity.toUpperCase(),
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14),
-                      ),
-                      const Spacer(),
-                      if (!alert.verified)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.white24,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text('DEMO',
-                              style: TextStyle(
-                                  color: Colors.white, fontSize: 10)),
+              backgroundColor: Colors.white.withAlpha(20),
+              elevation: 0,
+              iconTheme: const IconThemeData(color: Colors.white),
+            ),
+          ),
+        ),
+      ),
+      body: GlassScaffold(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, kToolbarHeight + 16, 16, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Severity banner
+              GlassContainer(
+                blur: true,
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                tint: SeverityColors.tint(alert.severity),
+                borderColor: SeverityColors.border(alert.severity),
+                shadows: SeverityColors.hasGlow(alert.severity)
+                    ? [
+                        BoxShadow(
+                          color: color.withAlpha(77),
+                          blurRadius: 20,
+                          spreadRadius: 2,
+                        )
+                      ]
+                    : null,
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        color: color, size: 20),
+                    const SizedBox(width: 6),
+                    Text(
+                      alert.severity.toUpperCase(),
+                      style: TextStyle(
+                          color: color,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14),
+                    ),
+                    const Spacer(),
+                    if (!alert.verified)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withAlpha(20),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: Colors.white24),
                         ),
-                    ],
+                        child: const Text('DEMO',
+                            style: TextStyle(
+                                color: Colors.white70, fontSize: 10)),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Headline
+              Text(
+                alert.headline,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 10),
+
+              // Expires
+              Row(
+                children: [
+                  const Icon(Icons.schedule, size: 16, color: Colors.white60),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Expires: ${_formatExpiry()}',
+                    style: const TextStyle(color: Colors.white60),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 16),
+              const Divider(height: 32),
 
-            // Headline
-            Text(
-              alert.headline,
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
+              // Instructions
+              const Text(
+                'Instructions',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                alert.instructions,
+                style: const TextStyle(
+                    color: Color(0xDEFFFFFF), fontSize: 15, height: 1.5),
+              ),
+              const Divider(height: 32),
 
-            // Expires
-            Row(
-              children: [
-                const Icon(Icons.schedule, size: 16, color: Colors.grey),
-                const SizedBox(width: 4),
-                Text(
-                  'Expires: ${_formatExpiry()}',
-                  style: const TextStyle(color: Colors.grey),
-                ),
-              ],
-            ),
-            const Divider(height: 32),
-
-            // Instructions
-            Text(
-              'Instructions',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              alert.instructions,
-              style: const TextStyle(fontSize: 15, height: 1.5),
-            ),
-            const Divider(height: 32),
-
-            // Metadata
-            _MetaRow(
-              label: 'Source',
-              value: alert.verified ? 'National Weather Service' : 'Demo Data',
-            ),
-            _MetaRow(
-              label: 'Alert ID',
-              value: alert.alertId,
-            ),
-            _MetaRow(
-              label: 'Received via',
-              value: 'Bluetooth LE',
-            ),
-          ],
+              // Metadata
+              _MetaRow(
+                label: 'Source',
+                value: alert.verified ? 'National Weather Service' : 'Demo Data',
+              ),
+              _MetaRow(
+                label: 'Alert ID',
+                value: alert.alertId,
+              ),
+              _MetaRow(
+                label: 'Received via',
+                value: 'Bluetooth LE',
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -151,9 +166,12 @@ class _MetaRow extends StatelessWidget {
             width: 90,
             child: Text(label,
                 style: const TextStyle(
-                    fontWeight: FontWeight.w500, color: Colors.grey)),
+                    fontWeight: FontWeight.w500, color: Colors.white54)),
           ),
-          Expanded(child: Text(value)),
+          Expanded(
+            child: Text(value,
+                style: const TextStyle(color: Colors.white)),
+          ),
         ],
       ),
     );

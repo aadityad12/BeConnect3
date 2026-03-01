@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/services.dart';
 import '../data/alert_packet.dart';
 import '../ble_constants.dart';
@@ -19,8 +20,10 @@ class GattServer {
 
   static Future<void> start(AlertPacket alert) async {
     if (_running) return;
+    final jsonBytes = utf8.encode(jsonEncode(alert.toJson()));
+    final compressed = Uint8List.fromList(gzip.encode(jsonBytes));
     await _channel.invokeMethod<void>('startAdvertising', {
-      'alertJson':    jsonEncode(alert.toJson()),
+      'alertBytes':   compressed,
       'severityByte': severityToByte(alert.severity),
     });
     _running = true;
