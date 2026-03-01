@@ -1,0 +1,4 @@
+dbus-next>=0.2.3
+
+[dev]
+pytest>=8.0.0

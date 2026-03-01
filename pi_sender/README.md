@@ -1,0 +1,90 @@
+# BeConnect Pi Sender (MVP)
+
+Raspberry Pi BLE broadcaster compatible with the existing BeConnect Android receiver app.
+
+## What it does
+- Stores and manages alert packets from CLI.
+- Publishes one current alert to `~/.beconnect-pi/current_alert.json`.
+- Broadcasts continuously via BLE advertisement + GATT service.
+- Serves chunked alert JSON using the same protocol as Android gateway mode.
+
+## Requirements
+- Raspberry Pi OS with Bluetooth adapter (Pi 5 built-in BLE is fine).
+- Python 3.10+.
+- BlueZ daemon running (`bluetoothd`).
+- Root or capabilities allowing BLE advertising/GATT peripheral registration.
+
+## Install
+```bash
+cd /home/becon/BeConnect-1/pi_sender
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -e .
+```
+
+## Command workflow (from VS Code terminal)
+Create a new alert:
+```bash
+beconnect-pi alert new \
+  --headline "Tornado Warning for Central County" \
+  --severity Extreme \
+  --expires 1767225600 \
+  --instructions "Take shelter in an interior room immediately." \
+  --source-url "local://operator" \
+  --verified false
+```
+
+List alerts:
+```bash
+beconnect-pi alert list
+```
+
+Edit an alert:
+```bash
+beconnect-pi alert edit <alert_id> --headline "Updated headline" --severity Severe
+```
+
+Publish an alert for broadcast:
+```bash
+beconnect-pi publish <alert_id>
+```
+
+Start broadcasting (background process):
+```bash
+beconnect-pi broadcast start
+```
+
+Check status:
+```bash
+beconnect-pi status
+```
+
+Stop broadcasting:
+```bash
+beconnect-pi broadcast stop
+```
+
+Run foreground mode for debugging:
+```bash
+beconnect-pi broadcast start --foreground
+```
+
+## Files used
+- `~/.beconnect-pi/alerts.json`
+- `~/.beconnect-pi/current_alert.json`
+- `~/.beconnect-pi/broadcaster.pid`
+- `~/.beconnect-pi/broadcaster.log`
+
+## Protocol compatibility (Android receiver)
+- Service UUID: `0000BCBC-0000-1000-8000-00805F9B34FB`
+- Alert characteristic (READ): `0000BCB1-0000-1000-8000-00805F9B34FB`
+- Control characteristic (WRITE): `0000BCB2-0000-1000-8000-00805F9B34FB`
+- Manufacturer ID: `0x1234`
+- Advertisement metadata: `[severity:1][alertIdHash:4][fetchedAt:4]`
+- Frame format: `[chunkIndex:2][totalChunks:2][payload:N]`
+
+## Notes
+- Android receivers still need to open Receiver Mode and tap a beacon.
+- Updating `current_alert.json` by running `publish` is picked up by the broadcaster within ~2 seconds.
+- If BLE startup fails, inspect `~/.beconnect-pi/broadcaster.log`.

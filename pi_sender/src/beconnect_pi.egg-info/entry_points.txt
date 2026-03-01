@@ -1,0 +1,2 @@
+[console_scripts]
+beconnect-pi = beconnect_pi.cli:main
