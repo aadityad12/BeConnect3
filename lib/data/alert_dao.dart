@@ -1,0 +1,54 @@
+import 'package:sqflite/sqflite.dart';
+import 'alert_database.dart';
+import 'alert_packet.dart';
+
+class AlertDao {
+  /// Inserts or replaces an alert, then prunes to keep at most 20.
+  Future<void> insert(AlertPacket alert) async {
+    final db = await AlertDatabase.database;
+    await db.insert(
+      'alerts',
+      {
+        'alertId':      alert.alertId,
+        'severity':     alert.severity,
+        'headline':     alert.headline,
+        'expires':      alert.expires,
+        'instructions': alert.instructions,
+        'sourceUrl':    alert.sourceUrl,
+        'verified':     alert.verified ? 1 : 0,
+        'fetchedAt':    alert.fetchedAt,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    await pruneOldAlerts();
+  }
+
+  /// Returns all alerts ordered by most recently fetched first.
+  Future<List<AlertPacket>> fetchAll() async {
+    final db = await AlertDatabase.database;
+    final rows = await db.query('alerts', orderBy: 'fetchedAt DESC');
+    return rows
+        .map((row) => AlertPacket(
+              alertId:      row['alertId'] as String,
+              severity:     row['severity'] as String,
+              headline:     row['headline'] as String,
+              expires:      row['expires'] as int,
+              instructions: row['instructions'] as String,
+              sourceUrl:    row['sourceUrl'] as String,
+              verified:     (row['verified'] as int) == 1,
+              fetchedAt:    row['fetchedAt'] as int,
+            ))
+        .toList();
+  }
+
+  /// Deletes all but the 20 most recently fetched alerts.
+  Future<void> pruneOldAlerts() async {
+    final db = await AlertDatabase.database;
+    await db.execute('''
+      DELETE FROM alerts
+      WHERE alertId NOT IN (
+        SELECT alertId FROM alerts ORDER BY fetchedAt DESC LIMIT 20
+      )
+    ''');
+  }
+}
