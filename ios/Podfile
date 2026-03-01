@@ -41,26 +41,69 @@ post_install do |installer|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
+      if target.name == 'flutter_background_service_ios'
+        config.build_settings['CLANG_ENABLE_MODULE_VERIFIER'] = 'NO'
+        config.build_settings['ENABLE_MODULE_VERIFIER'] = 'NO'
+        config.build_settings['CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER'] = 'NO'
+        config.build_settings['FRAMEWORK_SEARCH_PATHS'] = '$(inherited) "${PODS_CONFIGURATION_BUILD_DIR}/Flutter"'
+      end
+      if target.name == 'permission_handler_apple'
+        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)', 'COCOAPODS=1']
+        definitions = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS']
+        definitions = [definitions] unless definitions.is_a?(Array)
+        definitions << 'PERMISSION_BLUETOOTH=1' unless definitions.include?('PERMISSION_BLUETOOTH=1')
+        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = definitions
+      end
     end
   end
 
-  # flutter_background_service_ios 5.0.3: registerWithRegistrar: is implemented in
-  # the .m but only declared via conditional <FlutterPlugin> conformance in the .h.
-  # With use_frameworks!/use_modular_headers! the Flutter headers aren't visible when
-  # that header is compiled, so the compiler raises an ARC "unknown selector" error.
-  # Patch the dev-pod source (via .symlinks) to add an explicit declaration.
+  # flutter_background_service_ios 5.0.3 compatibility fixes for use_frameworks! +
+  # modular headers.
   header = File.expand_path(
     '../.symlinks/plugins/flutter_background_service_ios/ios/Classes/FlutterBackgroundServicePlugin.h',
     __FILE__
   )
   if File.exist?(header)
     content = File.read(header)
+    content.sub!(
+      '#import <Flutter/Flutter.h>',
+      "#if __has_include(<Flutter/Flutter.h>)\n#import <Flutter/Flutter.h>\n#else\n@protocol FlutterPlugin;\n@protocol FlutterPluginRegistrar;\n@class FlutterEngine;\n#endif"
+    ) unless content.include?('__has_include(<Flutter/Flutter.h>)')
+
     unless content.include?('registerWithRegistrar:')
       content.sub!(
         /(\+ \(void\)registerEngine:.*?;)/,
         "+ (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar;\n\\1"
       )
-      File.write(header, content)
     end
+    File.write(header, content)
+  end
+
+  impl = File.expand_path(
+    '../.symlinks/plugins/flutter_background_service_ios/ios/Classes/FlutterBackgroundServicePlugin.m',
+    __FILE__
+  )
+  if File.exist?(impl)
+    content = File.read(impl)
+    unless content.include?('__has_include(<Flutter/Flutter.h>)')
+      content.sub!(
+        '#import "FlutterBackgroundServicePlugin.h"',
+        "#import \"FlutterBackgroundServicePlugin.h\"\n#if __has_include(<Flutter/Flutter.h>)\n#import <Flutter/Flutter.h>\n#endif"
+      )
+      File.write(impl, content)
+    end
+  end
+
+  umbrella = File.expand_path(
+    'Pods/Target Support Files/flutter_background_service_ios/flutter_background_service_ios-umbrella.h',
+    __dir__
+  )
+  if File.exist?(umbrella)
+    content = File.read(umbrella)
+    content.gsub!(
+      '#import "FlutterBackgroundServicePlugin.h"',
+      '#import <flutter_background_service_ios/FlutterBackgroundServicePlugin.h>'
+    )
+    File.write(umbrella, content)
   end
 end

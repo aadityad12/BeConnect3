@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../utils/permissions.dart';
 import 'gateway/gateway_screen.dart';
 import 'receiver/receiver_screen.dart';
@@ -14,14 +15,50 @@ class _ModeSelectScreenState extends State<ModeSelectScreen> {
   bool _permissionsGranted = false;
   bool _checking = false;
 
-  void _initPermissions() async {
+  @override
+  void initState() {
+    super.initState();
+    _refreshPermissions();
+  }
+
+  Future<void> _refreshPermissions() async {
     setState(() => _checking = true);
-    final granted = await requestBlePermissions();
+    final granted = await hasBlePermissions();
     if (mounted) {
       setState(() {
         _permissionsGranted = granted;
         _checking = false;
       });
+    }
+  }
+
+  void _initPermissions() async {
+    setState(() => _checking = true);
+    await requestBlePermissions();
+    final granted = await hasBlePermissions();
+    final permanentlyDenied = await hasPermanentlyDeniedBlePermission();
+    if (mounted) {
+      setState(() {
+        _permissionsGranted = granted;
+        _checking = false;
+      });
+      if (!granted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              permanentlyDenied
+                  ? 'Bluetooth permission is blocked. Enable it in iOS Settings.'
+                  : 'Bluetooth permission is still not granted.',
+            ),
+            action: permanentlyDenied
+                ? SnackBarAction(
+                    label: 'Open Settings',
+                    onPressed: openAppSettings,
+                  )
+                : null,
+          ),
+        );
+      }
     }
   }
 
