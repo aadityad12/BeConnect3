@@ -39,5 +39,28 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
+    end
+  end
+
+  # flutter_background_service_ios 5.0.3: registerWithRegistrar: is implemented in
+  # the .m but only declared via conditional <FlutterPlugin> conformance in the .h.
+  # With use_frameworks!/use_modular_headers! the Flutter headers aren't visible when
+  # that header is compiled, so the compiler raises an ARC "unknown selector" error.
+  # Patch the dev-pod source (via .symlinks) to add an explicit declaration.
+  header = File.expand_path(
+    '../.symlinks/plugins/flutter_background_service_ios/ios/Classes/FlutterBackgroundServicePlugin.h',
+    __FILE__
+  )
+  if File.exist?(header)
+    content = File.read(header)
+    unless content.include?('registerWithRegistrar:')
+      content.sub!(
+        /(\+ \(void\)registerEngine:.*?;)/,
+        "+ (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar;\n\\1"
+      )
+      File.write(header, content)
+    end
   end
 end

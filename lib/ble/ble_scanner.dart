@@ -30,6 +30,25 @@ class BleScanner {
   static StreamSubscription<List<ScanResult>>? _sub;
 
   static Future<void> startScan() async {
+    // On iOS, CBCentralManager briefly reports unknown before settling.
+    // Skip transient states (unknown / turningOn) and wait for a definitive one.
+    var adapterState = FlutterBluePlus.adapterStateNow;
+    if (adapterState == BluetoothAdapterState.unknown ||
+        adapterState == BluetoothAdapterState.turningOn) {
+      adapterState = await FlutterBluePlus.adapterState
+          .where((s) =>
+              s != BluetoothAdapterState.unknown &&
+              s != BluetoothAdapterState.turningOn)
+          .first
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () => FlutterBluePlus.adapterStateNow,
+          );
+    }
+    if (adapterState != BluetoothAdapterState.on) {
+      throw Exception('Bluetooth is not available (state: ${adapterState.name})');
+    }
+
     _beacons.clear();
     _beaconsController.add([]);
 

@@ -2,8 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Status:** Project is being bootstrapped. This file documents the intended design. Code is written to match this spec.
-
 ## Project
 
 BeConnect is an offline-first emergency alert distribution system. A "gateway" device with internet fetches official alerts and broadcasts them locally via BLE to nearby phones — so people receive critical guidance even when cellular/Wi-Fi is down.
@@ -37,6 +35,8 @@ lib/
 │   └── alert_dao.dart              # insert, pruneOldAlerts (keeps last 20)
 ├── service/
 │   └── gateway_background_service.dart  # Keeps BLE advertising alive in background (flutter_background_service)
+├── utils/
+│   └── permissions.dart                 # requestBlePermissions() — called from ModeSelectScreen
 ├── ui/
 │   ├── mode_select_screen.dart     # Entry point; handles all runtime permission requests
 │   ├── gateway/
@@ -148,7 +148,7 @@ GatewayBackgroundService.stop();
 
 ### Permissions
 
-All runtime permissions are requested in `ModeSelectScreen` via `permission_handler` before navigating to either mode:
+All runtime permissions are requested via `requestBlePermissions()` in `lib/utils/permissions.dart`, called from `ModeSelectScreen` before navigating to either mode:
 
 **Android**
 - SDK 31+: `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `BLUETOOTH_ADVERTISE`
@@ -225,6 +225,41 @@ Demo fallback: `demo_alerts.dart` provides hardcoded packets with `verified = fa
 - **MTU negotiation:** `GattClient` calls `requestMtu(512)` on connect; await `onMtuChanged` before reading. Default MTU is 23 (20 usable bytes).
 - **GATT 133 error (Android):** Retry the full connect sequence once after 600ms.
 - **`flutter_blue_plus` state:** Always check `FlutterBluePlus.adapterState` before scanning/advertising and prompt the user to enable Bluetooth if needed.
+
+## Raspberry Pi Sender (`pi_sender/`)
+
+A standalone Python component that acts as a gateway running on a Raspberry Pi. Wire-compatible with the Flutter receiver — same BLE UUIDs, same GATT chunked protocol, same advertisement format.
+
+**Setup (on Pi):**
+```bash
+cd pi_sender
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+```
+
+**CLI workflow:**
+```bash
+# Create an alert
+beconnect-pi alert new --headline "..." --severity Extreme --expires <epoch> --instructions "..." --source-url "local://operator" --verified false
+
+# List / edit alerts
+beconnect-pi alert list
+beconnect-pi alert edit <alert_id> --severity Severe
+
+# Publish one alert for broadcast, then start the BLE broadcaster
+beconnect-pi publish <alert_id>
+beconnect-pi broadcast start          # background daemon
+beconnect-pi broadcast start --foreground  # debug
+beconnect-pi broadcast stop
+beconnect-pi status
+```
+
+State files live in `~/.beconnect-pi/` (`alerts.json`, `current_alert.json`, `broadcaster.pid`, `broadcaster.log`). The broadcaster polls `current_alert.json` every ~2 s, so re-running `publish` hot-swaps the alert without restarting the daemon.
+
+**Pi tests:**
+```bash
+cd pi_sender && python -m pytest tests/
+```
 
 ## Demo Script (End-to-End)
 

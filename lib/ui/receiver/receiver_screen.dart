@@ -30,11 +30,16 @@ class _ReceiverScreenState extends State<ReceiverScreen> {
       setState(() { _scanning = false; _status = 'Scan stopped.'; });
     } else {
       setState(() { _scanning = true; _status = 'Scanning for gateways…'; });
-      await BleScanner.startScan();
-      // startScan has a 30-second timeout; update state after it finishes
-      await Future<void>.delayed(const Duration(seconds: 30));
-      if (mounted && _scanning) {
-        setState(() { _scanning = false; _status = 'Scan complete.'; });
+      try {
+        await BleScanner.startScan();
+        await Future<void>.delayed(const Duration(seconds: 30));
+        if (mounted && _scanning) {
+          setState(() { _scanning = false; _status = 'Scan complete.'; });
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() { _scanning = false; _status = 'Could not start scan: $e'; });
+        }
       }
     }
   }
