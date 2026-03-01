@@ -1,24 +1,85 @@
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import '../../data/alert_packet.dart';
 import '../theme/severity_colors.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/glass_scaffold.dart';
 
-class AlertDetailScreen extends StatelessWidget {
+class AlertDetailScreen extends StatefulWidget {
   final AlertPacket alert;
 
   const AlertDetailScreen({super.key, required this.alert});
 
-  String _formatExpiry() {
-    final dt = DateTime.fromMillisecondsSinceEpoch(alert.expires * 1000);
-    return '${dt.month}/${dt.day} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')} local';
+  @override
+  State<AlertDetailScreen> createState() => _AlertDetailScreenState();
+}
+
+class _AlertDetailScreenState extends State<AlertDetailScreen> {
+  late final FlutterTts _tts;
+  bool _isSpeaking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initTts();
   }
 
+  Future<void> _initTts() async {
+    _tts = FlutterTts();
+    await _tts.setLanguage('en-US');
+    // Slightly slower than default for clarity during emergencies.
+    await _tts.setSpeechRate(Platform.isIOS ? 0.45 : 0.45);
+    await _tts.setVolume(1.0);
+    await _tts.setPitch(1.0);
+
+    _tts.setStartHandler(() {
+      if (mounted) setState(() => _isSpeaking = true);
+    });
+    _tts.setCompletionHandler(() {
+      if (mounted) setState(() => _isSpeaking = false);
+    });
+    _tts.setCancelHandler(() {
+      if (mounted) setState(() => _isSpeaking = false);
+    });
+    _tts.setErrorHandler((_) {
+      if (mounted) setState(() => _isSpeaking = false);
+    });
+  }
+
+  /// Builds the spoken string: severity + headline + instructions.
+  String get _speechText =>
+      '${widget.alert.severity} alert. ${widget.alert.headline}. '
+      'Instructions: ${widget.alert.instructions}';
+
+  Future<void> _toggleSpeech() async {
+    if (_isSpeaking) {
+      await _tts.stop();
+    } else {
+      await _tts.speak(_speechText);
+    }
+  }
+
+  @override
+  void dispose() {
+    _tts.stop();
+    super.dispose();
+  }
+
+  String _formatExpiry() {
+    final dt =
+        DateTime.fromMillisecondsSinceEpoch(widget.alert.expires * 1000);
+    return '${dt.month}/${dt.day} '
+        '${dt.hour.toString().padLeft(2, '0')}:'
+        '${dt.minute.toString().padLeft(2, '0')} local';
+  }
 
   @override
   Widget build(BuildContext context) {
+    final alert = widget.alert;
     final color = SeverityColors.main(alert.severity);
+
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: PreferredSize(
@@ -29,25 +90,39 @@ class AlertDetailScreen extends StatelessWidget {
             child: AppBar(
               title: const Text(
                 'Alert Details',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold),
               ),
               backgroundColor: Colors.white.withAlpha(20),
               elevation: 0,
               iconTheme: const IconThemeData(color: Colors.white),
+              actions: [
+                // Quick TTS toggle in the AppBar for one-tap access.
+                IconButton(
+                  icon: Icon(
+                    _isSpeaking ? Icons.stop_circle_outlined : Icons.volume_up,
+                    color: _isSpeaking ? color : Colors.white70,
+                  ),
+                  tooltip: _isSpeaking ? 'Stop reading' : 'Read aloud',
+                  onPressed: _toggleSpeech,
+                ),
+              ],
             ),
           ),
         ),
       ),
       body: GlassScaffold(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, kToolbarHeight + 16, 16, 24),
+          padding:
+              const EdgeInsets.fromLTRB(16, kToolbarHeight + 16, 16, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Severity banner
               GlassContainer(
                 blur: true,
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                padding: const EdgeInsets.symmetric(
+                    vertical: 12, horizontal: 16),
                 tint: SeverityColors.tint(alert.severity),
                 borderColor: SeverityColors.border(alert.severity),
                 shadows: SeverityColors.hasGlow(alert.severity)
@@ -103,7 +178,8 @@ class AlertDetailScreen extends StatelessWidget {
               // Expires
               Row(
                 children: [
-                  const Icon(Icons.schedule, size: 16, color: Colors.white60),
+                  const Icon(Icons.schedule,
+                      size: 16, color: Colors.white60),
                   const SizedBox(width: 4),
                   Text(
                     'Expires: ${_formatExpiry()}',
@@ -111,6 +187,15 @@ class AlertDetailScreen extends StatelessWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 16),
+
+              // ── Read Aloud button ──────────────────────────────────────
+              _ReadAloudButton(
+                isSpeaking: _isSpeaking,
+                color: color,
+                onTap: _toggleSpeech,
+              ),
+
               const Divider(height: 32),
 
               // Instructions
@@ -136,7 +221,9 @@ class AlertDetailScreen extends StatelessWidget {
               // Metadata
               _MetaRow(
                 label: 'Source',
-                value: alert.verified ? 'National Weather Service' : 'Demo Data',
+                value: alert.verified
+                    ? 'National Weather Service'
+                    : 'Demo Data',
               ),
               _MetaRow(
                 label: 'Alert ID',
@@ -154,6 +241,118 @@ class AlertDetailScreen extends StatelessWidget {
   }
 }
 
+// ─── Read Aloud button ────────────────────────────────────────────────────────
+
+class _ReadAloudButton extends StatelessWidget {
+  final bool isSpeaking;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _ReadAloudButton({
+    required this.isSpeaking,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding:
+            const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        decoration: BoxDecoration(
+          color: isSpeaking
+              ? color.withAlpha(40)
+              : Colors.white.withAlpha(15),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isSpeaking ? color.withAlpha(180) : Colors.white24,
+            width: isSpeaking ? 1.5 : 1,
+          ),
+          boxShadow: isSpeaking
+              ? [
+                  BoxShadow(
+                    color: color.withAlpha(40),
+                    blurRadius: 12,
+                    spreadRadius: 1,
+                  )
+                ]
+              : null,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isSpeaking ? Icons.stop_circle_outlined : Icons.volume_up,
+              color: isSpeaking ? color : Colors.white70,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Text(
+              isSpeaking ? 'Stop Reading' : 'Read Aloud',
+              style: TextStyle(
+                color: isSpeaking ? color : Colors.white70,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+              ),
+            ),
+            if (isSpeaking) ...[
+              const SizedBox(width: 12),
+              _PulseDot(color: color),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Animated pulsing dot shown while TTS is active.
+class _PulseDot extends StatefulWidget {
+  final Color color;
+  const _PulseDot({required this.color});
+
+  @override
+  State<_PulseDot> createState() => _PulseDotState();
+}
+
+class _PulseDotState extends State<_PulseDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, __) => Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: widget.color.withAlpha((100 + 155 * _ctrl.value).round()),
+        ),
+      ),
+    );
+  }
+}
+
 // ─── Hop count visualiser ─────────────────────────────────────────────────────
 
 class _HopCountRow extends StatelessWidget {
@@ -164,8 +363,8 @@ class _HopCountRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Build a chain of nodes: origin → hop 1 → hop 2 → … → this device.
-    // Cap the visual chain at 6 nodes so it always fits on screen.
-    final totalNodes = hopCount + 1; // origin + each relay + this device
+    // Cap the visual chain at 7 nodes so it always fits on screen.
+    final totalNodes = hopCount + 1;
     final displayNodes = totalNodes.clamp(1, 7);
     final truncated = totalNodes > 7;
 
@@ -206,7 +405,7 @@ class _HopCountRow extends StatelessWidget {
               ? 'Fetched directly — not relayed.'
               : hopCount == 1
                   ? 'Received directly from the source beacon (1 hop).'
-                  : 'Relayed through $hopCount device${hopCount == 1 ? '' : 's'} before reaching you.',
+                  : 'Relayed through $hopCount devices before reaching you.',
           style: const TextStyle(color: Colors.white54, fontSize: 12),
         ),
       ],
@@ -277,6 +476,8 @@ class _HopNode extends StatelessWidget {
   }
 }
 
+// ─── Metadata row ─────────────────────────────────────────────────────────────
+
 class _MetaRow extends StatelessWidget {
   final String label;
   final String value;
@@ -294,7 +495,8 @@ class _MetaRow extends StatelessWidget {
             width: 90,
             child: Text(label,
                 style: const TextStyle(
-                    fontWeight: FontWeight.w500, color: Colors.white54)),
+                    fontWeight: FontWeight.w500,
+                    color: Colors.white54)),
           ),
           Expanded(
             child: Text(value,

@@ -278,7 +278,7 @@ class _HomeScreenState extends State<HomeScreen>
             filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
             child: AppBar(
               title: const Text(
-                'BeConnect',
+                'Echo',
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
