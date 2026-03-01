@@ -80,8 +80,23 @@ class GattClient {
       decoded = data;
     }
 
-    return AlertPacket.fromJson(
+    final parsed = AlertPacket.fromJson(
       jsonDecode(utf8.decode(decoded)) as Map<String, dynamic>,
+    );
+
+    // Each BLE relay hop adds 1. The originating device (Pi or NWS fetch)
+    // starts at 0, so a direct Pi→phone receive lands at 1.
+    return AlertPacket(
+      alertId:      parsed.alertId,
+      severity:     parsed.severity,
+      headline:     parsed.headline,
+      expires:      parsed.expires,
+      instructions: parsed.instructions,
+      sourceUrl:    parsed.sourceUrl,
+      verified:     parsed.verified,
+      fetchedAt:    parsed.fetchedAt,
+      pinned:       parsed.pinned,
+      hopCount:     parsed.hopCount + 1,
     );
   }
 }

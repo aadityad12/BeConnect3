@@ -15,6 +15,7 @@ class AlertDetailScreen extends StatelessWidget {
     return '${dt.month}/${dt.day} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')} local';
   }
 
+
   @override
   Widget build(BuildContext context) {
     final color = SeverityColors.main(alert.severity);
@@ -128,6 +129,10 @@ class AlertDetailScreen extends StatelessWidget {
               ),
               const Divider(height: 32),
 
+              // Hop count visualiser
+              _HopCountRow(hopCount: alert.hopCount),
+              const Divider(height: 32),
+
               // Metadata
               _MetaRow(
                 label: 'Source',
@@ -145,6 +150,129 @@ class AlertDetailScreen extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ─── Hop count visualiser ─────────────────────────────────────────────────────
+
+class _HopCountRow extends StatelessWidget {
+  final int hopCount;
+
+  const _HopCountRow({required this.hopCount});
+
+  @override
+  Widget build(BuildContext context) {
+    // Build a chain of nodes: origin → hop 1 → hop 2 → … → this device.
+    // Cap the visual chain at 6 nodes so it always fits on screen.
+    final totalNodes = hopCount + 1; // origin + each relay + this device
+    final displayNodes = totalNodes.clamp(1, 7);
+    final truncated = totalNodes > 7;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Relay Path',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            for (int i = 0; i < displayNodes; i++) ...[
+              _HopNode(
+                isOrigin: i == 0,
+                isCurrent: i == displayNodes - 1 && !truncated,
+                isOverflow: truncated && i == displayNodes - 1,
+                overflowCount: truncated ? totalNodes - 6 : 0,
+              ),
+              if (i < displayNodes - 1)
+                Expanded(
+                  child: Container(
+                    height: 1.5,
+                    color: Colors.white24,
+                  ),
+                ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          hopCount == 0
+              ? 'Fetched directly — not relayed.'
+              : hopCount == 1
+                  ? 'Received directly from the source beacon (1 hop).'
+                  : 'Relayed through $hopCount device${hopCount == 1 ? '' : 's'} before reaching you.',
+          style: const TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+      ],
+    );
+  }
+}
+
+class _HopNode extends StatelessWidget {
+  final bool isOrigin;
+  final bool isCurrent;
+  final bool isOverflow;
+  final int overflowCount;
+
+  const _HopNode({
+    required this.isOrigin,
+    required this.isCurrent,
+    required this.isOverflow,
+    required this.overflowCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (isOverflow) {
+      return Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white.withAlpha(20),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: Center(
+          child: Text(
+            '+$overflowCount',
+            style: const TextStyle(
+              color: Colors.white54,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final Color nodeColor;
+    final IconData icon;
+    if (isOrigin) {
+      nodeColor = const Color(0xFF4CAF50);
+      icon = Icons.cell_tower;
+    } else if (isCurrent) {
+      nodeColor = const Color(0xFF42A5F5);
+      icon = Icons.smartphone;
+    } else {
+      nodeColor = Colors.white38;
+      icon = Icons.bluetooth;
+    }
+
+    return Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: nodeColor.withAlpha(30),
+        border: Border.all(color: nodeColor, width: 1.5),
+      ),
+      child: Icon(icon, size: 14, color: nodeColor),
     );
   }
 }

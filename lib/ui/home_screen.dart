@@ -23,14 +23,18 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   final _dao = AlertDao();
   List<AlertPacket> _alerts = [];
   bool _loading = false;   // NWS fetch in progress
   bool _scanning = false;  // foreground BLE scan in progress
   bool _meshActive = false;
+  bool _fabReady = false;
   String _scanStatus = '';
   String? _fetchError;
+
+  late final AnimationController _meshPulseCtrl;
 
   /// Cancelled in dispose() to prevent leaks.
   final _subs = <StreamSubscription>[];
@@ -38,6 +42,13 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _meshPulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    );
+    Future.delayed(const Duration(milliseconds: 350), () {
+      if (mounted) setState(() => _fabReady = true);
+    });
     _bootstrap();
   }
 
@@ -58,7 +69,10 @@ class _HomeScreenState extends State<HomeScreen> {
     // 4. Handle hot-restart case: service was already running, won't re-emit
     //    'serviceStarted', so check isRunning() directly.
     final alreadyRunning = await GatewayBackgroundService.service.isRunning();
-    if (alreadyRunning && mounted) setState(() => _meshActive = true);
+    if (alreadyRunning && mounted) {
+      setState(() => _meshActive = true);
+      if (!_meshPulseCtrl.isAnimating) _meshPulseCtrl.repeat(reverse: true);
+    }
 
     // 5. Load whatever alerts are already in the local DB.
     await _loadAlerts();
@@ -72,7 +86,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final svc = GatewayBackgroundService.service;
 
     _subs.add(svc.on('serviceStarted').listen((_) {
-      if (mounted) setState(() => _meshActive = true);
+      if (mounted) {
+        setState(() => _meshActive = true);
+        if (!_meshPulseCtrl.isAnimating) _meshPulseCtrl.repeat(reverse: true);
+      }
     }));
 
     // Background isolate found/relayed a new alert → update GattServer in
@@ -97,6 +114,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _meshPulseCtrl.dispose();
     for (final s in _subs) {
       s.cancel();
     }
@@ -270,8 +288,24 @@ class _HomeScreenState extends State<HomeScreen> {
               elevation: 0,
               actions: [
                 if (_meshActive)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
+                  AnimatedBuilder(
+                    animation: _meshPulseCtrl,
+                    builder: (_, child) => Container(
+                      margin: const EdgeInsets.only(right: 4),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF4CAF50).withAlpha(
+                              (30 + 25 * _meshPulseCtrl.value).round(),
+                            ),
+                            blurRadius: 14,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: child,
+                    ),
                     child: Chip(
                       label: const Text(
                         'MESH ACTIVE',
@@ -345,7 +379,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 SliverFillRemaining(
                   child: _EmptyState(scanning: _scanning),
                 )
-              else
+              else ...[
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
                   sliver: SliverList(
@@ -359,6 +393,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           key: ValueKey(alert.alertId),
                           alert: alert,
                           isNewest: isNewest,
+                          index: i,
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -373,25 +408,47 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ),
+                // "You're all caught up" footer
+                const SliverToBoxAdapter(
+                  child: Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Text(
+                        "You're all caught up",
+                        style: TextStyle(color: Colors.white24, fontSize: 13),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
       ),
-      // FAB for manual re-scan.
-      floatingActionButton: FloatingActionButton(
-        onPressed: _scanning ? null : _runForegroundScan,
-        tooltip: 'Scan for beacons',
-        backgroundColor: _scanning
-            ? Colors.white.withAlpha(30)
-            : const Color(0xFFE64A19).withAlpha(217),
-        child: _scanning
-            ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                    color: Colors.white, strokeWidth: 2.5),
-              )
-            : const Icon(Icons.bluetooth_searching, color: Colors.white),
+      // FAB for manual re-scan — scales in with elastic bounce.
+      floatingActionButton: AnimatedScale(
+        scale: _fabReady ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.elasticOut,
+        child: FloatingActionButton(
+          onPressed: _scanning ? null : _runForegroundScan,
+          tooltip: 'Scan for beacons',
+          backgroundColor: _scanning
+              ? Colors.white.withAlpha(30)
+              : const Color(0xFFE64A19).withAlpha(217),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: Colors.white.withAlpha(40), width: 1),
+          ),
+          child: _scanning
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                      color: Colors.white, strokeWidth: 2.5),
+                )
+              : const Icon(Icons.bluetooth_searching, color: Colors.white),
+        ),
       ),
     );
   }
@@ -399,11 +456,34 @@ class _HomeScreenState extends State<HomeScreen> {
 
 // ─── Scan status banner ───────────────────────────────────────────────────────
 
-class _ScanBanner extends StatelessWidget {
+class _ScanBanner extends StatefulWidget {
   final String status;
   final bool scanning;
 
   const _ScanBanner({required this.status, required this.scanning});
+
+  @override
+  State<_ScanBanner> createState() => _ScanBannerState();
+}
+
+class _ScanBannerState extends State<_ScanBanner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _shimmerCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _shimmerCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _shimmerCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -416,12 +496,39 @@ class _ScanBanner extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (scanning)
-              const LinearProgressIndicator(
-                color: Color(0xFFE64A19),
-                backgroundColor: Colors.white12,
+            if (widget.scanning) ...[
+              // Track
+              Container(
+                height: 3,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(2),
+                  color: Colors.white.withAlpha(20),
+                ),
               ),
-            if (scanning) const SizedBox(height: 8),
+              const SizedBox(height: 2),
+              // Shimmer sweep
+              AnimatedBuilder(
+                animation: _shimmerCtrl,
+                builder: (_, __) => ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: Container(
+                    height: 3,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment(_shimmerCtrl.value * 4 - 2, 0),
+                        end: Alignment(_shimmerCtrl.value * 4 - 1, 0),
+                        colors: const [
+                          Colors.transparent,
+                          Color(0xFFE64A19),
+                          Colors.transparent,
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             Row(
               children: [
                 const Icon(Icons.bluetooth_searching,
@@ -429,7 +536,7 @@ class _ScanBanner extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    status.isNotEmpty ? status : 'Scanning…',
+                    widget.status.isNotEmpty ? widget.status : 'Scanning…',
                     style: const TextStyle(color: Colors.white70, fontSize: 13),
                   ),
                 ),
@@ -524,11 +631,12 @@ class _EmptyState extends StatelessWidget {
 
 // ─── Alert card ───────────────────────────────────────────────────────────────
 
-class _AlertCard extends StatelessWidget {
+class _AlertCard extends StatefulWidget {
   final AlertPacket alert;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
   final bool isNewest;
+  final int index;
 
   const _AlertCard({
     super.key,
@@ -536,11 +644,51 @@ class _AlertCard extends StatelessWidget {
     required this.onTap,
     required this.onLongPress,
     this.isNewest = false,
+    this.index = 0,
   });
+
+  @override
+  State<_AlertCard> createState() => _AlertCardState();
+}
+
+class _AlertCardState extends State<_AlertCard> with TickerProviderStateMixin {
+  late final AnimationController _entranceCtrl;
+  late final AnimationController _glowCtrl;
+  bool _isPressed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _entranceCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _glowCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2500),
+    );
+
+    // Stagger entrance: each card delays by 50ms × its index (capped at 6).
+    final delay = Duration(milliseconds: 50 * widget.index.clamp(0, 6));
+    Future.delayed(delay, () {
+      if (mounted) _entranceCtrl.forward();
+    });
+
+    if (SeverityColors.hasGlow(widget.alert.severity)) {
+      _glowCtrl.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _entranceCtrl.dispose();
+    _glowCtrl.dispose();
+    super.dispose();
+  }
 
   String _formatAge() {
     final age =
-        DateTime.now().millisecondsSinceEpoch ~/ 1000 - alert.fetchedAt;
+        DateTime.now().millisecondsSinceEpoch ~/ 1000 - widget.alert.fetchedAt;
     if (age < 60) return '${age}s ago';
     if (age < 3600) return '${age ~/ 60}m ago';
     return '${age ~/ 3600}h ago';
@@ -548,100 +696,156 @@ class _AlertCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final alert = widget.alert;
     final color = SeverityColors.main(alert.severity);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: SeverityColors.tint(alert.severity),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: SeverityColors.border(alert.severity)),
-        boxShadow: SeverityColors.hasGlow(alert.severity)
-            ? [
-                BoxShadow(
-                  color: color.withAlpha(64),
-                  blurRadius: 16,
-                  spreadRadius: 1,
-                )
-              ]
-            : null,
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          onLongPress: onLongPress,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 4,
-                  height: 56,
+    final hasGlow = SeverityColors.hasGlow(alert.severity);
+
+    return FadeTransition(
+      opacity: _entranceCtrl,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.08),
+          end: Offset.zero,
+        ).animate(CurvedAnimation(parent: _entranceCtrl, curve: Curves.easeOut)),
+        child: AnimatedScale(
+          scale: _isPressed ? 0.97 : 1.0,
+          duration: const Duration(milliseconds: 150),
+          child: GestureDetector(
+            onTapDown: (_) => setState(() => _isPressed = true),
+            onTapUp: (_) => setState(() => _isPressed = false),
+            onTapCancel: () => setState(() => _isPressed = false),
+            child: AnimatedBuilder(
+              animation: _glowCtrl,
+              builder: (_, child) {
+                final glowAlpha = (20 + 31 * _glowCtrl.value).round();
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: color,
-                    borderRadius: BorderRadius.circular(2),
+                    color: SeverityColors.tint(alert.severity),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                        color: SeverityColors.border(alert.severity)),
+                    boxShadow: hasGlow
+                        ? [
+                            BoxShadow(
+                              color: color.withAlpha(glowAlpha),
+                              blurRadius: 20,
+                              spreadRadius: 2,
+                            )
+                          ]
+                        : null,
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: color,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              alert.severity.toUpperCase(),
-                              style: const TextStyle(
+                  child: child,
+                );
+              },
+              // child is cached — only the Container decoration rebuilds each frame.
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: widget.onTap,
+                  onLongPress: widget.onLongPress,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Accent bar
+                        Container(
+                          width: 4,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: color,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  // Severity pill badge
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: color.withAlpha(40),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                          color: color.withAlpha(150),
+                                          width: 0.8),
+                                    ),
+                                    child: Text(
+                                      alert.severity.toUpperCase(),
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                        letterSpacing: 0.8,
+                                      ),
+                                    ),
+                                  ),
+                                  if (!alert.verified) ...[
+                                    const SizedBox(width: 6),
+                                    // DEMO tag — pill style, clearly secondary
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withAlpha(12),
+                                        borderRadius:
+                                            BorderRadius.circular(20),
+                                        border: Border.all(
+                                            color: Colors.white24,
+                                            width: 0.5),
+                                      ),
+                                      child: const Text(
+                                        'DEMO',
+                                        style: TextStyle(
+                                          color: Colors.white38,
+                                          fontSize: 10,
+                                          letterSpacing: 0.5,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                  if (alert.pinned) ...[
+                                    const SizedBox(width: 6),
+                                    const Icon(Icons.push_pin,
+                                        size: 11, color: Colors.white54),
+                                  ],
+                                  const Spacer(),
+                                  Text(
+                                    _formatAge(),
+                                    style: const TextStyle(
+                                        color: Colors.white54, fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                alert.headline,
+                                style: const TextStyle(
                                   color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold),
-                            ),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
                           ),
-                          if (!alert.verified) ...[
-                            const SizedBox(width: 6),
-                            const Text('DEMO',
-                                style: TextStyle(
-                                    color: Colors.white54, fontSize: 10)),
-                          ],
-                          if (alert.pinned) ...[
-                            const SizedBox(width: 6),
-                            const Icon(Icons.push_pin,
-                                size: 11, color: Colors.white54),
-                          ],
-                          const Spacer(),
-                          Text(
-                            _formatAge(),
-                            style: const TextStyle(
-                                color: Colors.white54, fontSize: 11),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        alert.headline,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.arrow_forward_ios,
+                            size: 14, color: Colors.white38),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(width: 4),
-                const Icon(Icons.arrow_forward_ios,
-                    size: 14, color: Colors.white38),
-              ],
+              ),
             ),
           ),
         ),
@@ -743,8 +947,11 @@ class _AlertContextMenu extends StatelessWidget {
 
                 // Delete option — only for non-newest alerts
                 if (onDelete != null) ...[
-                  const Divider(color: Colors.white12, height: 1,
-                      indent: 20, endIndent: 20),
+                  const Divider(
+                      color: Colors.white12,
+                      height: 1,
+                      indent: 20,
+                      endIndent: 20),
                   _ContextMenuItem(
                     icon: Icons.delete_outline_rounded,
                     label: 'Delete alert',

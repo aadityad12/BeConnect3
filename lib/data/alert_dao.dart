@@ -18,6 +18,7 @@ class AlertDao {
         'verified':     alert.verified ? 1 : 0,
         'fetchedAt':    alert.fetchedAt,
         'pinned':       alert.pinned ? 1 : 0,
+        'hopCount':     alert.hopCount,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -56,6 +57,7 @@ class AlertDao {
               verified:     (row['verified'] as int) == 1,
               fetchedAt:    row['fetchedAt'] as int,
               pinned:       (row['pinned'] as int? ?? 0) == 1,
+              hopCount:     row['hopCount'] as int? ?? 0,
             ))
         .toList();
   }

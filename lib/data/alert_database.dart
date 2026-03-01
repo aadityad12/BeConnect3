@@ -17,7 +17,7 @@ class AlertDatabase {
     final path = join(dir.path, 'beconnect.db');
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE alerts (
@@ -29,7 +29,8 @@ class AlertDatabase {
             sourceUrl     TEXT    NOT NULL,
             verified      INTEGER NOT NULL,
             fetchedAt     INTEGER NOT NULL,
-            pinned        INTEGER NOT NULL DEFAULT 0
+            pinned        INTEGER NOT NULL DEFAULT 0,
+            hopCount      INTEGER NOT NULL DEFAULT 0
           )
         ''');
       },
@@ -37,6 +38,11 @@ class AlertDatabase {
         if (oldVersion < 2) {
           await db.execute(
             'ALTER TABLE alerts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+        if (oldVersion < 3) {
+          await db.execute(
+            'ALTER TABLE alerts ADD COLUMN hopCount INTEGER NOT NULL DEFAULT 0',
           );
         }
       },

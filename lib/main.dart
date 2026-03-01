@@ -11,6 +11,31 @@ void main() async {
   runApp(const BeConnectApp());
 }
 
+/// Fade + 4% slide-up page transition applied to both Android and iOS.
+class _FadeSlideTransitionBuilder extends PageTransitionsBuilder {
+  const _FadeSlideTransitionBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    return FadeTransition(
+      opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.04),
+          end: Offset.zero,
+        ).chain(CurveTween(curve: Curves.easeOut)).animate(animation),
+        child: child,
+      ),
+    );
+  }
+}
+
 class BeConnectApp extends StatelessWidget {
   const BeConnectApp({super.key});
 
@@ -36,6 +61,12 @@ class BeConnectApp extends StatelessWidget {
           systemOverlayStyle: SystemUiOverlayStyle.light,
         ),
         dividerColor: Colors.white12,
+        pageTransitionsTheme: const PageTransitionsTheme(
+          builders: {
+            TargetPlatform.android: _FadeSlideTransitionBuilder(),
+            TargetPlatform.iOS: _FadeSlideTransitionBuilder(),
+          },
+        ),
       ),
       home: const HomeScreen(),
     );
