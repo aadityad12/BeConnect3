@@ -104,6 +104,30 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  // ── Delete alert ────────────────────────────────────────────────────────────
+
+  /// Deletes [alert] from the local database and removes it from the list.
+  ///
+  /// Business rule: the most recently received alert (index 0) must never be
+  /// deleted. This method is only ever called for index > 0.
+  Future<void> _deleteAlert(AlertPacket alert) async {
+    // Optimistic UI update — remove immediately so the list stays in sync
+    // with what the Dismissible already animated away.
+    setState(() => _alerts.removeWhere((a) => a.alertId == alert.alertId));
+
+    await _dao.deleteAlert(alert.alertId);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Alert deleted'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   // ── Foreground BLE scan ─────────────────────────────────────────────────────
 
   /// Runs a 15-second foreground scan in the main isolate.
@@ -300,15 +324,32 @@ class _HomeScreenState extends State<HomeScreen> {
                   padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate(
-                      (_, i) => _AlertCard(
-                        alert: _alerts[i],
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => AlertDetailScreen(alert: _alerts[i]),
+                      (_, i) {
+                        final alert = _alerts[i];
+                        final card = _AlertCard(
+                          alert: alert,
+                          isNewest: i == 0,
+                          onDelete: i == 0 ? null : () => _deleteAlert(alert),
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => AlertDetailScreen(alert: alert),
+                            ),
                           ),
-                        ),
-                      ),
+                        );
+
+                        // Index 0 is the most recently received alert —
+                        // business rule prohibits deleting it.
+                        if (i == 0) return card;
+
+                        return Dismissible(
+                          key: ValueKey(alert.alertId),
+                          direction: DismissDirection.endToStart,
+                          background: const _DeleteBackground(),
+                          onDismissed: (_) => _deleteAlert(alert),
+                          child: card,
+                        );
+                      },
                       childCount: _alerts.length,
                     ),
                   ),
@@ -467,8 +508,15 @@ class _EmptyState extends StatelessWidget {
 class _AlertCard extends StatelessWidget {
   final AlertPacket alert;
   final VoidCallback onTap;
+  final bool isNewest;
+  final VoidCallback? onDelete;
 
-  const _AlertCard({required this.alert, required this.onTap});
+  const _AlertCard({
+    required this.alert,
+    required this.onTap,
+    this.isNewest = false,
+    this.onDelete,
+  });
 
   String _formatAge() {
     final age =
@@ -543,6 +591,11 @@ class _AlertCard extends StatelessWidget {
                                 style: TextStyle(
                                     color: Colors.white54, fontSize: 10)),
                           ],
+                          if (isNewest) ...[
+                            const SizedBox(width: 6),
+                            const Icon(Icons.push_pin,
+                                size: 11, color: Colors.white38),
+                          ],
                           const Spacer(),
                           Text(
                             _formatAge(),
@@ -564,14 +617,57 @@ class _AlertCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: 4),
-                const Icon(Icons.arrow_forward_ios,
-                    size: 14, color: Colors.white38),
+                if (onDelete != null) ...[
+                  const SizedBox(width: 4),
+                  // Delete button — tap is consumed here and does NOT bubble
+                  // up to the parent InkWell, so navigation is unaffected.
+                  SizedBox(
+                    width: 32,
+                    height: 32,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: onDelete,
+                        child: const Icon(
+                          Icons.delete_outline_rounded,
+                          size: 18,
+                          color: Colors.white38,
+                        ),
+                      ),
+                    ),
+                  ),
+                ] else ...[
+                  const SizedBox(width: 4),
+                  const Icon(Icons.arrow_forward_ios,
+                      size: 14, color: Colors.white38),
+                ],
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+// ─── Swipe-to-delete background ───────────────────────────────────────────────
+
+class _DeleteBackground extends StatelessWidget {
+  const _DeleteBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      // Mirror the margin from _AlertCard so the background aligns perfectly.
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.red.shade700,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      alignment: Alignment.centerRight,
+      padding: const EdgeInsets.only(right: 24),
+      child: const Icon(Icons.delete_rounded, color: Colors.white, size: 28),
     );
   }
 }

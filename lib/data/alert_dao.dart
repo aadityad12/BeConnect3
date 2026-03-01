@@ -55,6 +55,12 @@ class AlertDao {
         .toList();
   }
 
+  /// Deletes a single alert by its unique ID.
+  Future<void> deleteAlert(String alertId) async {
+    final db = await AlertDatabase.database;
+    await db.delete('alerts', where: 'alertId = ?', whereArgs: [alertId]);
+  }
+
   /// Deletes all but the 20 most recently fetched alerts.
   Future<void> pruneOldAlerts() async {
     final db = await AlertDatabase.database;
