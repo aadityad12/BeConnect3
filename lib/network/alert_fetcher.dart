@@ -5,7 +5,7 @@ import '../data/alert_packet.dart';
 class AlertFetcher {
   static const _url =
       'https://api.weather.gov/alerts/active'
-      '?status=actual&message_type=alert&limit=5';
+      '?status=actual&message_type=alert';
 
   /// Fetches active NWS alerts and returns parsed AlertPackets.
   /// Throws on network error or non-200 status.
