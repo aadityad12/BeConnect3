@@ -4,71 +4,50 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-BeConnect is an offline-first emergency alert distribution system. A "gateway" device with internet fetches official alerts and broadcasts them locally via BLE to nearby phones — so people receive critical guidance even when cellular/Wi-Fi is down.
+BeConnect (app name: "Echo") is an offline-first emergency alert distribution system. Every device is a **unified autonomous mesh node** — it simultaneously advertises alerts via BLE GATT and scans for alerts from nearby nodes. No mode selection at runtime.
 
-**Architecture model:** Cloud pull + offline push (one-way trusted alert dissemination).
+**Architecture model:** Cloud pull (NWS GeoJSON) + offline BLE gossip mesh (bidirectional relaying).
 
-**Platform:** Flutter (Dart) — targets both Android (API 26+) and iOS (14+).
+**Platform:** Flutter (Dart) — targets Android (API 26+) and iOS (14+).
 
 ## App Structure
 
-Single Flutter app with two operating modes selectable at runtime:
-
-- **Gateway mode** — fetches alerts from NWS GeoJSON API → BLE advertise metadata → GATT server serves full JSON packet on demand
-- **Receiver mode** — BLE scan → filter by service UUID → GATT client connects → downloads + reassembles chunks → displays alert → persists locally
-
 ```
 lib/
+├── main.dart                       # Init background service, mount HomeScreen
 ├── ble_constants.dart              # UUIDs, MANUFACTURER_ID, DEFAULT_CHUNK_SIZE
 ├── ble/
 │   ├── ble_advertiser.dart         # Thin delegate → forwards to GattServer
-│   ├── gatt_server.dart            # MethodChannel bridge to native (start/stop advertising + GATT)
-│   ├── ble_scanner.dart            # Receiver: scan + filter; defines BeaconInfo; scanForMesh() for background
-│   ├── gatt_client.dart            # Receiver: connect + chunked read (async/await)
+│   ├── gatt_server.dart            # MethodChannel bridge to native (start/stop/restart advertising + GATT)
+│   ├── ble_scanner.dart            # Scan + filter by serviceUuid; scanForMesh() isolate-safe
+│   ├── gatt_client.dart            # Connect + chunked read (async/await)
 │   └── chunk_utils.dart            # Chunk/reassemble; encode/decode frame format
 ├── network/
 │   ├── alert_fetcher.dart          # Fetch NWS GeoJSON (http package)
 │   └── alert_parser.dart          # Parse GeoJSON → AlertPacket
 ├── data/
 │   ├── alert_packet.dart           # Data model + JSON serialization (json_serializable)
+│   │                               # Fields: alertId, severity, headline, expires, instructions,
+│   │                               #         sourceUrl, verified, fetchedAt, pinned, hopCount
+│   ├── alert_packet.g.dart         # Generated — do NOT edit manually
 │   ├── alert_database.dart         # SQLite DB singleton (sqflite)
-│   └── alert_dao.dart              # insert, hasAlert, fetchAll, pruneOldAlerts (keeps last 20)
+│   └── alert_dao.dart              # insert, hasAlert, fetchAll, pruneOldAlerts (keeps last 20),
+│                                   # deleteAlert, setPinned
 ├── service/
-│   └── gateway_background_service.dart  # Background service: BLE advertising + gossip mesh loop (every 5 min)
+│   └── gateway_background_service.dart  # Background mesh loop (every 5 min); IPC bridge
 ├── utils/
-│   └── permissions.dart                 # requestBlePermissions() — called from ModeSelectScreen
+│   └── permissions.dart                 # requestBlePermissions() — called from HomeScreen._bootstrap()
 ├── ui/
-│   ├── mode_select_screen.dart     # Entry point; handles all runtime permission requests
-│   ├── gateway/
-│   │   └── gateway_screen.dart     # Fetch/demo, preview, start/stop broadcasting
-│   └── receiver/
-│       ├── receiver_screen.dart    # Scan, list beacons, connect on tap
-│       ├── beacon_list_item.dart   # List tile widget for BeaconInfo
-│       └── alert_detail_screen.dart
+│   ├── home_screen.dart            # Unified UI: permissions → service → scan → list alerts
+│   ├── receiver/
+│   │   └── alert_detail_screen.dart    # AlertDetailScreen({required AlertPacket alert})
+│   ├── theme/
+│   │   └── severity_colors.dart        # Color helpers keyed by severity string
+│   └── widgets/
+│       ├── glass_container.dart        # Frosted-glass Container
+│       └── glass_scaffold.dart         # Scaffold with animated gradient background
 └── demo/
-    └── demo_alerts.dart            # Hardcoded fallback AlertPackets
-```
-
-## Key Dependencies (`pubspec.yaml`)
-
-```yaml
-dependencies:
-  flutter:
-    sdk: flutter
-  flutter_blue_plus: ^1.32.0      # BLE central + peripheral (Android & iOS)
-  http: ^1.2.0                    # NWS API requests
-  sqflite: ^2.3.0                 # Local SQLite persistence
-  path_provider: ^2.1.0           # DB file path
-  json_annotation: ^4.9.0         # JSON serialization
-  flutter_background_service: ^5.0.5  # Background BLE advertising
-  permission_handler: ^11.3.0     # Runtime permissions (Android & iOS)
-  crypto: ^3.0.3                  # SHA-1 for alertId generation
-
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-  build_runner: ^2.4.0
-  json_serializable: ^6.8.0
+    └── demo_alerts.dart            # Hardcoded fallback AlertPackets (verified: false)
 ```
 
 ## Build & Run
@@ -77,20 +56,14 @@ dev_dependencies:
 # Get dependencies
 flutter pub get
 
-# Generate JSON serialization code (one-shot)
+# Generate JSON serialization code (after editing alert_packet.dart)
 dart run build_runner build --delete-conflicting-outputs
-
-# Watch and regenerate on save (use during active development)
-dart run build_runner watch --delete-conflicting-outputs
 
 # Run on connected device (debug)
 flutter run
 
-# Build release APK (Android)
-flutter build apk --release
-
-# Build release IPA (iOS — requires macOS + Xcode)
-flutter build ipa --release
+# Analyze (lint)
+flutter analyze
 
 # Run all tests
 flutter test
@@ -98,25 +71,54 @@ flutter test
 # Run a single test file
 flutter test test/chunk_utils_test.dart
 
-# Analyze (lint)
-flutter analyze
+# Build release APK (Android)
+flutter build apk --release
+
+# Build release IPA (iOS — requires macOS + Xcode)
+flutter build ipa --release
 ```
 
-Open in Android Studio or VS Code with the Flutter extension. Ensure the Flutter SDK is on your `PATH`.
-
-> **Generated files:** `lib/data/alert_packet.g.dart` is produced by `build_runner` from `alert_packet.dart`. Do not edit `.g.dart` files manually — re-run `build_runner build` instead.
+> **Generated file:** `lib/data/alert_packet.g.dart` is produced by `build_runner`. Re-run after any change to `alert_packet.dart`.
 
 - **Android** Min SDK: **26**. Target SDK: **34**.
 - **iOS** Deployment target: **14.0**.
 
-## Native Layer (Platform Channel)
+## Key Dependencies (`pubspec.yaml`)
 
-BLE advertising and the GATT server are implemented natively, not in Dart. `GattServer` is a MethodChannel bridge that calls `com.beconnect.beconnect/ble` with two methods: `startAdvertising({alertJson, severityByte})` and `stopAdvertising`.
+```yaml
+flutter_blue_plus: ^1.32.0          # BLE central + peripheral
+http: ^1.2.0                        # NWS API requests
+sqflite: ^2.3.0                     # SQLite persistence
+json_annotation: ^4.9.0
+flutter_background_service: ^5.0.5  # Background BLE mesh loop
+permission_handler: ^11.3.0
+crypto: ^3.0.3                      # SHA-1 for alertId generation
+```
 
-- **Android:** `android/app/src/main/kotlin/com/beconnect/beconnect/MainActivity.kt` — uses `BluetoothLeAdvertiser` + `BluetoothGattServer`. Chunks the JSON payload at **508 bytes** (512 MTU − 4-byte header). Tracks per-device requested chunk index in `pendingChunkIndex`.
-- **iOS:** `ios/Runner/AppDelegate.swift` — uses `CBPeripheralManager`. Same 508-byte chunk size. Starts advertising (`CBAdvertisementDataServiceUUIDsKey` + `CBAdvertisementDataLocalNameKey: "BeConnect"`) only after `peripheralManagerDidUpdateState` fires `.poweredOn`.
+## Critical Architectural Constraint: Two Flutter Engines
 
-`BleAdvertiser` is a thin Dart delegate that just calls through to `GattServer` and exists only as a named abstraction.
+`GattServer` uses `MethodChannel('com.beconnect.beconnect/ble')`, registered **only** in the main Flutter engine (MainActivity / AppDelegate). The `flutter_background_service` background isolate runs a **separate engine** — calling `GattServer` there throws `MissingPluginException`.
+
+**Rule:** All `GattServer.start/stop/restart` calls must stay in `HomeScreen` (main isolate). The background isolate communicates via IPC events instead.
+
+### IPC event flow
+
+| Direction | Event | Payload |
+|---|---|---|
+| background → main | `serviceStarted` | (none) |
+| background → main | `meshAlert` | `{alertJson: String}` |
+| main → background | `notifyAlert` | `{alertJson: String}` |
+
+`HomeScreen` subscribes via `GatewayBackgroundService.service.on(eventName).listen(...)`.
+
+## Startup Sequence (`HomeScreen._bootstrap`)
+
+1. `requestBlePermissions()` — all BLE + location + notification permissions
+2. `GatewayBackgroundService.start()` — idempotent; launches background mesh isolate
+3. Subscribe to IPC events (`serviceStarted`, `meshAlert`)
+4. Check `isRunning()` for hot-restart case (service won't re-emit `serviceStarted`)
+5. `_loadAlerts()` — populate list from SQLite
+6. `_runForegroundScan()` — immediate 15-second foreground BLE scan
 
 ## BLE Architecture Details
 
@@ -126,81 +128,45 @@ const serviceUuid      = '0000BCBC-0000-1000-8000-00805F9B34FB';
 const alertCharUuid    = '0000BCB1-0000-1000-8000-00805F9B34FB'; // read: chunked alert data
 const controlCharUuid  = '0000BCB2-0000-1000-8000-00805F9B34FB'; // write: requested chunk index
 const manufacturerId   = 0x1234;
-const defaultChunkSize = 17; // receiver-side default before MTU negotiation; native gateway uses 508
 ```
 
-### Advertising payload (31-byte limit)
-Uses `flutter_blue_plus` `AdvertiseData` with `serviceUuid` + manufacturer-specific data:
-```
-[severity 1-byte] + rest of metadata bytes
-```
-`BleScanner` filters on `serviceUuid` and parses manufacturer data for the severity byte.
+### BLE manufacturer data format
+`[severity: 1 byte][alertIdHash: 4 bytes][fetchedAt: 4 bytes]`
 
-> **iOS note:** CoreBluetooth does not allow advertising raw manufacturer-specific data or custom service UUIDs in the foreground the same way Android does. On iOS, the gateway must use `CBPeripheralManager` via the plugin's peripheral API; the advertised packet will include the service UUID but manufacturer data may be stripped when the app is backgrounded. Receiver-side scanning on iOS requires the app to be in the foreground or use a background mode entitlement.
+`alertIdHash` = first 8 hex chars of SHA-1(headline+expires) — used for loop prevention via `dao.hasAlert()`.
 
 ### GATT chunk transfer protocol
 1. Receiver connects → `requestMtu(512)` → `discoverServices`
-2. For each chunk: receiver writes 2-byte big-endian index to `controlCharUuid`, then reads `alertCharUuid`
-3. Frame format: `[chunkIndex: 2 bytes BE][totalChunks: 2 bytes BE][payload: N bytes]`
-4. After all chunks received, receiver reassembles bytes → JSON-deserializes → `AlertPacket`
+2. For each chunk: write 2-byte big-endian index to `controlCharUuid`, read `alertCharUuid`
+3. Frame format: `[chunkIndex: 2 bytes BE][totalChunks: 2 bytes BE][payload: ≤508 bytes]`
+4. Reassemble bytes → JSON-deserialize → `AlertPacket`
 
-`GattClient` uses `async`/`await` with `StreamController`/`Completer` for callback-to-future bridging. `GATT_ERROR 133` on Android on first connect is common — retry once after 600ms.
+Native chunk size is **508 bytes** (512 MTU − 4-byte header). `GATT_ERROR 133` on Android on first connect is common — `GattClient` retries once after 600ms.
 
-### Background service + gossip mesh
-`GatewayBackgroundService` uses `flutter_background_service` with a persistent foreground notification on Android (`foregroundServiceType: connectedDevice`) and a background task on iOS (limited — iOS may suspend after ~3 min unless the `bluetooth-peripheral` background mode is enabled in `Info.plist`).
+### Gossip mesh loop (background)
+Every 5 minutes (and once on startup): `BleScanner.scanForMesh()` → for each beacon, check `alertIdHash` against DB → download unknown alerts via `GattClient.downloadAlert()` → persist → emit `meshAlert` IPC event → HomeScreen calls `GattServer.restart()`. One new alert relayed per cycle to avoid flooding.
 
-It also implements an **infect-and-forward gossip mesh**: every 5 minutes (and once immediately on start) it calls `BleScanner.scanForMesh()`, checks each beacon's `alertIdHash` against the local DB via `AlertDao.hasAlert()`, downloads any unknown alert via `GattClient.downloadAlert()`, persists it, and re-broadcasts it via `GattServer.start()`. Only one new alert is relayed per cycle to avoid flooding.
+## Native Layer (Platform Channel)
 
-Start/stop via:
-```dart
-GatewayBackgroundService.start(alert);
-GatewayBackgroundService.stop();
-```
+- **Android:** `android/app/src/main/kotlin/com/beconnect/beconnect/MainActivity.kt` — `BluetoothLeAdvertiser` + `BluetoothGattServer`; chunks JSON at 508 bytes; tracks per-device requested chunk index in `pendingChunkIndex`.
+- **iOS:** `ios/Runner/AppDelegate.swift` — `CBPeripheralManager`; same 508-byte chunks; starts advertising after `peripheralManagerDidUpdateState` fires `.poweredOn`.
 
-### Permissions
+Methods: `startAdvertising({alertJson, severityByte})` and `stopAdvertising`.
 
-All runtime permissions are requested via `requestBlePermissions()` in `lib/utils/permissions.dart`, called from `ModeSelectScreen` before navigating to either mode:
+## Data Model (`AlertPacket`)
 
-**Android**
-- SDK 31+: `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `BLUETOOTH_ADVERTISE`
-- SDK 33+: `POST_NOTIFICATIONS`
-- Always: `ACCESS_FINE_LOCATION`
-
-**iOS** — add to `Info.plist`:
-```xml
-<key>NSBluetoothAlwaysUsageDescription</key>
-<string>BeConnect uses Bluetooth to send and receive emergency alerts.</string>
-<key>NSBluetoothPeripheralUsageDescription</key>
-<string>BeConnect uses Bluetooth to broadcast emergency alerts to nearby devices.</string>
-<!-- For background BLE advertising: -->
-<key>UIBackgroundModes</key>
-<array>
-  <string>bluetooth-central</string>
-  <string>bluetooth-peripheral</string>
-</array>
-```
-
-`AndroidManifest.xml` permissions are handled automatically by `flutter_blue_plus` and `permission_handler` via manifest merging; verify they are present in `android/app/src/main/AndroidManifest.xml`.
-
-## Data Model
-
-`AlertPacket` is the data model used for both SQLite persistence and JSON serialization for BLE transfer. Generated with `json_serializable`.
-
-```dart
-@JsonSerializable()
-class AlertPacket {
-  final String alertId;       // first 8 chars of SHA-1(headline+expires)
-  final String severity;      // "Extreme" | "Severe" | "Moderate" | "Minor" | "Unknown"
-  final String headline;
-  final int expires;           // Unix epoch seconds
-  final String instructions;
-  final String sourceUrl;
-  final bool verified;         // true only if fetched from NWS
-  final int fetchedAt;         // Unix epoch seconds
-
-  // ...factory AlertPacket.fromJson / toJson generated by build_runner
-}
-```
+| Field | Type | Notes |
+|---|---|---|
+| `alertId` | `String` | First 8 chars of SHA-1(headline+expires) |
+| `severity` | `String` | `"Extreme"│"Severe"│"Moderate"│"Minor"│"Unknown"` |
+| `headline` | `String` | |
+| `expires` | `int` | Unix epoch seconds |
+| `instructions` | `String` | |
+| `sourceUrl` | `String` | |
+| `verified` | `bool` | `true` only if fetched from NWS |
+| `fetchedAt` | `int` | Unix epoch seconds |
+| `pinned` | `bool` | Pinned alerts sort first; cannot be deleted |
+| `hopCount` | `int` | 0 = originated here; +1 per BLE relay hop |
 
 ## NWS API
 
@@ -209,72 +175,50 @@ GET https://api.weather.gov/alerts/active?status=actual&message_type=alert&limit
 Accept: application/geo+json
 User-Agent: BeConnect/1.0 (hackathon@beconnect.app)
 ```
-Response: GeoJSON `features[]`; each feature's `properties` has `severity`, `headline`, `instruction`, `expires` (ISO-8601), `@id`. No API key required.
-
-Demo fallback: `demo_alerts.dart` provides hardcoded packets with `verified = false`.
-
-## MVP Scope Boundaries
-
-**In scope:** Gateway fetch → advertise → GATT serve; Receiver scan → download → display → SQLite (last 20 alerts); Demo mode; gossip mesh relay; Android + iOS.
-
-**Explicitly out of scope:**
-- Cryptographic PKI / signature verification beyond `verified` boolean
-- User-generated alert messages
-- Real-time continuous sync
-
-**Nice-to-haves (only if core is done):**
-- `flutter_tts` read-aloud (offline, uses platform TTS)
-- Two-language toggle with hardcoded translations
-
-## BLE Debugging Tips
-
-- **Scanning returns no results (Android):** Verify `ACCESS_FINE_LOCATION` is granted and location services are enabled (required even with `neverForLocation`).
-- **Scanning returns no results (iOS):** BLE scanning requires the app to be in the foreground unless the `bluetooth-central` background mode is enabled. Verify `NSBluetoothAlwaysUsageDescription` is in `Info.plist`.
-- **Advertising fails silently (Android):** Check `BluetoothAdapter.isMultipleAdvertisementSupported()` via `flutter_blue_plus`. Emulators do not support BLE advertising — use physical devices.
-- **Advertising on iOS:** CoreBluetooth silently drops manufacturer-specific data when advertising; the service UUID will still be broadcast. Test on a physical iPhone — the iOS Simulator does not support BLE.
-- **MTU negotiation:** `GattClient` calls `requestMtu(512)` on connect; await `onMtuChanged` before reading. Default MTU is 23 (20 usable bytes).
-- **GATT 133 error (Android):** Retry the full connect sequence once after 600ms.
-- **`flutter_blue_plus` state:** Always check `FlutterBluePlus.adapterState` before scanning/advertising and prompt the user to enable Bluetooth if needed.
+No API key required. `demoAlerts` in `demo_alerts.dart` provides fallback packets with `verified = false`.
 
 ## Raspberry Pi Sender (`pi_sender/`)
 
-A standalone Python component that acts as a gateway running on a Raspberry Pi. Wire-compatible with the Flutter receiver — same BLE UUIDs, same GATT chunked protocol, same advertisement format.
+Standalone Python component — wire-compatible with the Flutter mesh (same UUIDs, GATT protocol, advertisement format). Acts as an always-on seeder node.
 
-**Setup (on Pi):**
 ```bash
 cd pi_sender
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
-```
 
-**CLI workflow:**
-```bash
-# Create an alert
-beconnect-pi alert new --headline "..." --severity Extreme --expires <epoch> --instructions "..." --source-url "local://operator" --verified false
-
-# List / edit alerts
-beconnect-pi alert list
-beconnect-pi alert edit <alert_id> --severity Severe
-
-# Publish one alert for broadcast, then start the BLE broadcaster
+beconnect-pi alert new --headline "..." --severity Extreme --expires <epoch> \
+    --instructions "..." --source-url "local://operator" --verified false
 beconnect-pi publish <alert_id>
-beconnect-pi broadcast start          # background daemon
-beconnect-pi broadcast start --foreground  # debug
+beconnect-pi broadcast start        # background daemon
 beconnect-pi broadcast stop
 beconnect-pi status
+
+# Tests
+python -m pytest tests/
 ```
 
-State files live in `~/.beconnect-pi/` (`alerts.json`, `current_alert.json`, `broadcaster.pid`, `broadcaster.log`). The broadcaster polls `current_alert.json` every ~2 s, so re-running `publish` hot-swaps the alert without restarting the daemon.
+State files: `~/.beconnect-pi/` (`alerts.json`, `current_alert.json`, `broadcaster.pid`). Re-running `publish` hot-swaps the alert without restarting the daemon.
 
-**Pi tests:**
-```bash
-cd pi_sender && python -m pytest tests/
+## BLE Debugging Tips
+
+- **No scan results (Android):** Verify `ACCESS_FINE_LOCATION` is granted and location services are enabled.
+- **No scan results (iOS):** App must be in foreground or have `bluetooth-central` background mode.
+- **Advertising fails silently (Android):** Check `isMultipleAdvertisementSupported()`; emulators do not support BLE advertising.
+- **Advertising on iOS:** CoreBluetooth silently drops manufacturer-specific data; service UUID still broadcasts. iOS Simulator does not support BLE.
+- **GATT 133 (Android):** Retry the full connect sequence once after 600ms — already handled in `GattClient`.
+- **`flutter_blue_plus` state:** Always check `FlutterBluePlus.adapterState` before scanning/advertising.
+- **"Timed out waiting for CONFIGURATION_BUILD_DIR":** Transient Xcode bug; fix: `pkill Xcode`, then re-run.
+
+## iOS `Info.plist` Requirements
+
+```xml
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>BeConnect uses Bluetooth to send and receive emergency alerts.</string>
+<key>NSBluetoothPeripheralUsageDescription</key>
+<string>BeConnect uses Bluetooth to broadcast emergency alerts to nearby devices.</string>
+<key>UIBackgroundModes</key>
+<array>
+  <string>bluetooth-central</string>
+  <string>bluetooth-peripheral</string>
+</array>
 ```
-
-## Demo Script (End-to-End)
-
-1. Both phones have the app installed (Android or iOS, mixed is fine).
-2. Gateway phone: Wi-Fi ON → "Gateway Mode" → "Fetch Alert" (or "Demo Mode") → "Start Broadcasting".
-3. Receiver phone: disable Wi-Fi, Bluetooth ON → "Receiver Mode" → "Scan" → beacon appears.
-4. Tap beacon → downloads and displays alert with severity + headline + instructions.
-5. Target: under 60 seconds from scan to displayed alert.
