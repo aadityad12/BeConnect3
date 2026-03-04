@@ -60,15 +60,14 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        Log.d(TAG, "Configuring Flutter Engine")
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "startAdvertising" -> {
-                        val alertJson   = call.argument<String>("alertJson") ?: ""
+                        val alertBytes   = call.argument<ByteArray>("alertBytes") ?: byteArrayOf()
                         val severityByte = (call.argument<Int>("severityByte") ?: 4).toByte()
-                        startGateway(alertJson, severityByte, result)
+                        startGateway(alertBytes, severityByte, result)
                     }
                     "stopAdvertising" -> stopGateway(result)
                     else -> result.notImplemented()
@@ -77,9 +76,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun hasPermission(permission: String): Boolean {
-        val status = ContextCompat.checkSelfPermission(this, permission)
-        Log.d(TAG, "Permission $permission status: $status")
-        return status == PackageManager.PERMISSION_GRANTED
+        return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun checkBluetoothPermissions(): Boolean {
@@ -91,24 +88,21 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun startGateway(alertJson: String, severityByte: Byte, result: MethodChannel.Result) {
-        Log.d(TAG, "Starting Gateway")
+    private fun startGateway(alertBytes: ByteArray, severityByte: Byte, result: MethodChannel.Result) {
         val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
         val adapter = bluetoothManager.adapter
 
         if (adapter == null || !adapter.isEnabled) {
-            Log.e(TAG, "Bluetooth disabled or not supported")
             result.error("BLE_ERROR", "Bluetooth is disabled or not supported", null)
             return
         }
 
         if (!checkBluetoothPermissions()) {
-            Log.e(TAG, "Permissions not granted")
             result.error("PERMISSION_ERROR", "Bluetooth permissions not granted", null)
             return
         }
 
-        val jsonBytes = alertJson.toByteArray(Charsets.UTF_8)
+        val jsonBytes = alertBytes
         val total = Math.ceil(jsonBytes.size.toDouble() / PAYLOAD_SIZE).toInt().coerceAtLeast(1)
         alertChunks = (0 until total).map { i ->
             val start   = i * PAYLOAD_SIZE
@@ -121,7 +115,6 @@ class MainActivity : FlutterActivity() {
         }
 
         try {
-            Log.d(TAG, "Opening GATT Server")
             gattServer = bluetoothManager.openGattServer(this, gattServerCallback)
             val alertChar = BluetoothGattCharacteristic(
                 ALERT_CHAR_UUID,
@@ -140,7 +133,6 @@ class MainActivity : FlutterActivity() {
 
             advertiser = adapter.bluetoothLeAdvertiser
             if (advertiser == null) {
-                Log.e(TAG, "Advertising not supported")
                 result.error("BLE_ERROR", "Device does not support BLE advertising", null)
                 return
             }
@@ -158,24 +150,19 @@ class MainActivity : FlutterActivity() {
                 .build()
             
             advertiser?.startAdvertising(settings, data, advertiseCallback)
-            Log.d(TAG, "Advertising started successfully")
             result.success(null)
         } catch (e: SecurityException) {
-            Log.e(TAG, "SecurityException: ${e.message}")
             result.error("SECURITY_EXCEPTION", e.message, null)
         } catch (e: Exception) {
-            Log.e(TAG, "Exception: ${e.message}")
             result.error("UNKNOWN_ERROR", e.message, null)
         }
     }
 
     private fun stopGateway(result: MethodChannel.Result) {
-        Log.d(TAG, "Stopping Gateway")
         try {
             advertiser?.stopAdvertising(advertiseCallback)
             gattServer?.close()
         } catch (e: Exception) {
-            Log.e(TAG, "Error stopping: ${e.message}")
         } finally {
             advertiser     = null
             gattServer     = null
@@ -186,17 +173,12 @@ class MainActivity : FlutterActivity() {
     }
 
     private val advertiseCallback = object : AdvertiseCallback() {
-        override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
-            Log.d(TAG, "onStartSuccess")
-        }
-        override fun onStartFailure(errorCode: Int) {
-            Log.e(TAG, "onStartFailure: $errorCode")
-        }
+        override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {}
+        override fun onStartFailure(errorCode: Int) {}
     }
 
     private val gattServerCallback = object : BluetoothGattServerCallback() {
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
-            Log.d(TAG, "onConnectionStateChange: ${device.address} -> $newState")
             if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 pendingChunkIndex.remove(device.address)
             }
