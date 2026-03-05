@@ -109,7 +109,8 @@ import Translation
     @available(iOS 18.0, *)
     private func downloadedLanguageCodes() async -> [String] {
         let candidates = ["es", "fr", "de", "zh", "ja", "ko", "pt", "ar",
-                          "ru", "vi", "it", "nl", "tr", "uk", "id", "pl"]
+                          "ru", "vi", "it", "nl", "tr", "uk", "id", "pl",
+                          "hi", "th", "sv", "nb", "el", "he"]
         let availability = LanguageAvailability()
         let english = Locale.Language(identifier: "en")
         var installed: [String] = []

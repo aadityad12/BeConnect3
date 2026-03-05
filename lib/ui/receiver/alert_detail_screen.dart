@@ -9,6 +9,11 @@ import '../theme/severity_colors.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/glass_scaffold.dart';
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+bool _isDemo(AlertPacket a) =>
+    a.alertId.startsWith('demo') || a.sourceUrl.contains('weather.gov/demo');
+
 // ─── Language choice ──────────────────────────────────────────────────────────
 
 class _LangChoice {
@@ -21,22 +26,28 @@ class _LangChoice {
 
 const _languages = [
   _LangChoice('Original (English)', null, 'en-US'),
-  _LangChoice('Spanish', 'es', 'es-ES'),
+  _LangChoice('Arabic', 'ar', 'ar-SA'),
+  _LangChoice('Chinese (Simplified)', 'zh', 'zh-CN'),
+  _LangChoice('Dutch', 'nl', 'nl-NL'),
   _LangChoice('French', 'fr', 'fr-FR'),
   _LangChoice('German', 'de', 'de-DE'),
-  _LangChoice('Chinese (Simplified)', 'zh', 'zh-CN'),
+  _LangChoice('Greek', 'el', 'el-GR'),
+  _LangChoice('Hebrew', 'he', 'he-IL'),
+  _LangChoice('Hindi', 'hi', 'hi-IN'),
+  _LangChoice('Indonesian', 'id', 'id-ID'),
+  _LangChoice('Italian', 'it', 'it-IT'),
   _LangChoice('Japanese', 'ja', 'ja-JP'),
   _LangChoice('Korean', 'ko', 'ko-KR'),
+  _LangChoice('Norwegian', 'nb', 'nb-NO'),
+  _LangChoice('Polish', 'pl', 'pl-PL'),
   _LangChoice('Portuguese', 'pt', 'pt-BR'),
-  _LangChoice('Arabic', 'ar', 'ar-SA'),
   _LangChoice('Russian', 'ru', 'ru-RU'),
-  _LangChoice('Vietnamese', 'vi', 'vi-VN'),
-  _LangChoice('Italian', 'it', 'it-IT'),
-  _LangChoice('Dutch', 'nl', 'nl-NL'),
+  _LangChoice('Spanish', 'es', 'es-ES'),
+  _LangChoice('Swedish', 'sv', 'sv-SE'),
+  _LangChoice('Thai', 'th', 'th-TH'),
   _LangChoice('Turkish', 'tr', 'tr-TR'),
   _LangChoice('Ukrainian', 'uk', 'uk-UA'),
-  _LangChoice('Indonesian', 'id', 'id-ID'),
-  _LangChoice('Polish', 'pl', 'pl-PL'),
+  _LangChoice('Vietnamese', 'vi', 'vi-VN'),
 ];
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -247,7 +258,21 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                           fontSize: 14),
                     ),
                     const Spacer(),
-                    if (!alert.verified)
+                    if (alert.verified)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1B5E20).withAlpha(180),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: const Color(0xFF4CAF50).withAlpha(150)),
+                        ),
+                        child: const Text('NWS',
+                            style: TextStyle(
+                                color: Color(0xFF81C784), fontSize: 10,
+                                fontWeight: FontWeight.bold)),
+                      )
+                    else if (_isDemo(alert))
                       Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 6, vertical: 2),
@@ -340,7 +365,9 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                 label: 'Source',
                 value: alert.verified
                     ? 'National Weather Service'
-                    : 'Demo Data',
+                    : _isDemo(alert)
+                        ? 'Demo Data'
+                        : 'Echo Mesh (BLE Relay)',
               ),
               if (issuedStr != null)
                 _MetaRow(label: 'Issued', value: issuedStr),
@@ -349,8 +376,8 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                 value: alert.alertId,
               ),
               _MetaRow(
-                label: 'Received via',
-                value: 'Bluetooth LE',
+                label: 'Delivered via',
+                value: 'Echo Mesh (BLE)',
               ),
             ],
           ),
@@ -360,7 +387,7 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
   }
 }
 
-// ─── Language dropdown ────────────────────────────────────────────────────────
+// ─── Language picker (glass bottom sheet) ────────────────────────────────────
 
 class _LanguageDropdown extends StatelessWidget {
   final _LangChoice selected;
@@ -376,23 +403,34 @@ class _LanguageDropdown extends StatelessWidget {
     required this.onChanged,
   });
 
+  void _openPicker(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _LanguagePickerSheet(
+        selected: selected,
+        languages: languages!,
+        onChanged: (l) {
+          Navigator.pop(context);
+          onChanged(l);
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Still checking what's downloaded
     if (languages == null) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.white.withAlpha(15),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.white24),
-        ),
+      return _GlassRow(
         child: const Row(
           children: [
             SizedBox(
               width: 14,
               height: 14,
-              child: CircularProgressIndicator(color: Colors.white38, strokeWidth: 2),
+              child: CircularProgressIndicator(
+                  color: Colors.white38, strokeWidth: 2),
             ),
             SizedBox(width: 10),
             Text('Loading languages…',
@@ -404,13 +442,7 @@ class _LanguageDropdown extends StatelessWidget {
 
     // Only "Original" available — no languages downloaded yet
     if (languages!.length <= 1) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.white.withAlpha(15),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.white24),
-        ),
+      return _GlassRow(
         child: const Row(
           children: [
             Icon(Icons.language, color: Colors.white24, size: 16),
@@ -418,7 +450,8 @@ class _LanguageDropdown extends StatelessWidget {
             Expanded(
               child: Text(
                 'No translation languages downloaded.\nAdd them in Settings → General → Language & Region → Translation Languages.',
-                style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.4),
+                style: TextStyle(
+                    color: Colors.white38, fontSize: 12, height: 1.4),
               ),
             ),
           ],
@@ -426,33 +459,187 @@ class _LanguageDropdown extends StatelessWidget {
       );
     }
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white.withAlpha(15),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white24),
+    final isOriginal = selected.langCode == null;
+
+    return GestureDetector(
+      onTap: translating ? null : () => _openPicker(context),
+      child: _GlassRow(
+        child: Row(
+          children: [
+            translating
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        color: Colors.white54, strokeWidth: 2),
+                  )
+                : Icon(
+                    isOriginal
+                        ? Icons.language_outlined
+                        : Icons.translate,
+                    color: isOriginal ? Colors.white38 : Colors.white70,
+                    size: 18,
+                  ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                translating ? 'Translating…' : selected.label,
+                style: TextStyle(
+                  color: translating
+                      ? Colors.white38
+                      : isOriginal
+                          ? Colors.white54
+                          : Colors.white,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            if (!translating)
+              const Icon(Icons.expand_more,
+                  color: Colors.white38, size: 18),
+          ],
+        ),
       ),
-      child: DropdownButton<_LangChoice>(
-        value: selected,
-        isExpanded: true,
-        dropdownColor: const Color(0xFF1A1040),
-        underline: const SizedBox.shrink(),
-        icon: translating
-            ? const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                    color: Colors.white54, strokeWidth: 2))
-            : const Icon(Icons.language, color: Colors.white54, size: 20),
-        style: const TextStyle(color: Colors.white, fontSize: 14),
-        items: languages!
-            .map((l) => DropdownMenuItem(
-                  value: l,
-                  child: Text(l.label),
-                ))
-            .toList(),
-        onChanged: translating ? null : (v) => v != null ? onChanged(v) : null,
+    );
+  }
+}
+
+class _GlassRow extends StatelessWidget {
+  final Widget child;
+  const _GlassRow({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white.withAlpha(18),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white.withAlpha(38)),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class _LanguagePickerSheet extends StatelessWidget {
+  final _LangChoice selected;
+  final List<_LangChoice> languages;
+  final ValueChanged<_LangChoice> onChanged;
+
+  const _LanguagePickerSheet({
+    required this.selected,
+    required this.languages,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF0D0F1A).withAlpha(230),
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(24)),
+            border: const Border(
+              top: BorderSide(color: Colors.white12),
+              left: BorderSide(color: Colors.white12),
+              right: BorderSide(color: Colors.white12),
+            ),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Drag handle
+                const SizedBox(height: 12),
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Translate To',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Divider(color: Colors.white12, height: 1),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.55,
+                  ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    itemCount: languages.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(color: Colors.white12, height: 1),
+                    itemBuilder: (_, i) {
+                      final lang = languages[i];
+                      final isSelected = lang.langCode == selected.langCode;
+                      return InkWell(
+                        onTap: () => onChanged(lang),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 14),
+                          child: Row(
+                            children: [
+                              Icon(
+                                lang.langCode == null
+                                    ? Icons.language_outlined
+                                    : Icons.translate,
+                                size: 18,
+                                color: isSelected
+                                    ? const Color(0xFFE64A19)
+                                    : Colors.white38,
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Text(
+                                  lang.label,
+                                  style: TextStyle(
+                                    color: isSelected
+                                        ? Colors.white
+                                        : Colors.white70,
+                                    fontSize: 15,
+                                    fontWeight: isSelected
+                                        ? FontWeight.w600
+                                        : FontWeight.normal,
+                                  ),
+                                ),
+                              ),
+                              if (isSelected)
+                                const Icon(Icons.check,
+                                    color: Color(0xFFE64A19), size: 18),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -587,7 +774,7 @@ class _HopCountRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Relay Path',
+          'Echo Path',
           style: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
@@ -617,10 +804,10 @@ class _HopCountRow extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           hopCount == 0
-              ? 'Fetched directly — not relayed.'
+              ? 'Received directly from a Relay node (0 echoes).'
               : hopCount == 1
-                  ? 'Received directly from the source beacon (1 hop).'
-                  : 'Relayed through $hopCount devices before reaching you.',
+                  ? 'Echoed once — 1 Echo device relayed this to you.'
+                  : 'Echoed $hopCount times through nearby Echo devices.',
           style: const TextStyle(color: Colors.white54, fontSize: 12),
         ),
       ],

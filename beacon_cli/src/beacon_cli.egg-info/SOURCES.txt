@@ -1,0 +1,15 @@
+pyproject.toml
+src/beacon_cli/__init__.py
+src/beacon_cli/__main__.py
+src/beacon_cli/ble_server.py
+src/beacon_cli/cli.py
+src/beacon_cli/constants.py
+src/beacon_cli/model.py
+src/beacon_cli/protocol.py
+src/beacon_cli/storage.py
+src/beacon_cli.egg-info/PKG-INFO
+src/beacon_cli.egg-info/SOURCES.txt
+src/beacon_cli.egg-info/dependency_links.txt
+src/beacon_cli.egg-info/entry_points.txt
+src/beacon_cli.egg-info/requires.txt
+src/beacon_cli.egg-info/top_level.txt

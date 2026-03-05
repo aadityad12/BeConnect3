@@ -2,9 +2,20 @@ import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'widgets/glass_container.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  /// Called when the user taps "Download NWS Alerts" — runs in HomeScreen context.
+  final VoidCallback? onFetchNws;
+
+  /// Called when the user taps "Load Demo Alerts" — runs in HomeScreen context.
+  final VoidCallback? onLoadDemo;
+
+  const SettingsScreen({
+    super.key,
+    this.onFetchNws,
+    this.onLoadDemo,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -43,7 +54,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final raw = prefs.getString(_prefKey);
     if (raw != null) {
       final list = (jsonDecode(raw) as List).cast<String>();
-      setState(() => _selected = list.toSet());
+      if (mounted) setState(() => _selected = list.toSet());
     }
   }
 
@@ -68,6 +79,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final sortedCodes = _states.keys.toList()..sort();
+
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: PreferredSize(
@@ -78,20 +90,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: AppBar(
               title: const Text(
                 'Settings',
-                style: TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.bold),
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
               ),
               backgroundColor: Colors.white.withAlpha(20),
               elevation: 0,
               iconTheme: const IconThemeData(color: Colors.white),
-              actions: [
-                if (_selected.isNotEmpty)
-                  TextButton(
-                    onPressed: _clearAll,
-                    child: const Text('Clear all',
-                        style: TextStyle(color: Colors.white70)),
-                  ),
-              ],
             ),
           ),
         ),
@@ -105,65 +108,325 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         child: SafeArea(
-          child: Column(
-            children: [
-              // Header hint
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withAlpha(12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white12),
+          child: CustomScrollView(
+            slivers: [
+              // ── Data section ──────────────────────────────────────────────
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: _SectionHeader(
+                    icon: Icons.cloud_outlined,
+                    label: 'Data Sources',
                   ),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 10),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.info_outline,
-                          color: Colors.white38, size: 16),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _selected.isEmpty
-                              ? 'No states selected — fetching alerts for all states.'
-                              : '${_selected.length} state${_selected.length == 1 ? '' : 's'} selected.',
-                          style: const TextStyle(
-                              color: Colors.white54, fontSize: 13),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: GlassContainer(
+                    blur: true,
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // NWS button
+                        _DataButton(
+                          icon: Icons.cloud_download_outlined,
+                          label: 'Download NWS Alerts',
+                          subtitle: 'Fetch live alerts from the National Weather Service',
+                          color: const Color(0xFF1565C0),
+                          onTap: widget.onFetchNws == null
+                              ? null
+                              : () {
+                                  Navigator.pop(context);
+                                  widget.onFetchNws!();
+                                },
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 10),
+                        // Demo button
+                        _DataButton(
+                          icon: Icons.science_outlined,
+                          label: 'Load Demo Alerts',
+                          subtitle: 'Inject sample alerts for testing without a Relay',
+                          color: const Color(0xFF4A148C),
+                          onTap: widget.onLoadDemo == null
+                              ? null
+                              : () {
+                                  Navigator.pop(context);
+                                  widget.onLoadDemo!();
+                                },
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
 
+              // ── State filter section ──────────────────────────────────────
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+                  child: _SectionHeader(
+                    icon: Icons.location_on_outlined,
+                    label: 'NWS State Filter',
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: GlassContainer(
+                    blur: true,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 12),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline,
+                            color: Colors.white38, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _selected.isEmpty
+                                ? 'No states selected — fetching alerts for all states.'
+                                : '${_selected.length} state${_selected.length == 1 ? '' : 's'} selected for NWS filtering.',
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 13),
+                          ),
+                        ),
+                        if (_selected.isNotEmpty)
+                          GestureDetector(
+                            onTap: _clearAll,
+                            child: const Padding(
+                              padding: EdgeInsets.only(left: 8),
+                              child: Text('Clear',
+                                  style: TextStyle(
+                                      color: Color(0xFFE64A19),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600)),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 8)),
+
               // State list
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (_, i) {
+                      final code = sortedCodes[i];
+                      final name = _states[code]!;
+                      final checked = _selected.contains(code);
+                      final isFirst = i == 0;
+                      final isLast = i == sortedCodes.length - 1;
+
+                      return _StateTile(
+                        code: code,
+                        name: name,
+                        checked: checked,
+                        isFirst: isFirst,
+                        isLast: isLast,
+                        onTap: () => _toggle(code),
+                      );
+                    },
+                    childCount: sortedCodes.length,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Section header ───────────────────────────────────────────────────────────
+
+class _SectionHeader extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _SectionHeader({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: Colors.white38, size: 15),
+        const SizedBox(width: 6),
+        Text(
+          label.toUpperCase(),
+          style: const TextStyle(
+            color: Colors.white38,
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.2,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Data source button ───────────────────────────────────────────────────────
+
+class _DataButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String subtitle;
+  final Color color;
+  final VoidCallback? onTap;
+
+  const _DataButton({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.color,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: color.withAlpha(40),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withAlpha(100)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: color.withAlpha(60),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: Colors.white70, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 11)),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right,
+                color: color.withAlpha(180), size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── State tile ───────────────────────────────────────────────────────────────
+
+class _StateTile extends StatelessWidget {
+  final String code;
+  final String name;
+  final bool checked;
+  final bool isFirst;
+  final bool isLast;
+  final VoidCallback onTap;
+
+  const _StateTile({
+    required this.code,
+    required this.name,
+    required this.checked,
+    required this.isFirst,
+    required this.isLast,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: EdgeInsets.only(
+          bottom: isLast ? 0 : 1,
+        ),
+        decoration: BoxDecoration(
+          color: checked
+              ? const Color(0xFFE64A19).withAlpha(25)
+              : Colors.white.withAlpha(8),
+          borderRadius: BorderRadius.only(
+            topLeft: isFirst ? const Radius.circular(12) : Radius.zero,
+            topRight: isFirst ? const Radius.circular(12) : Radius.zero,
+            bottomLeft: isLast ? const Radius.circular(12) : Radius.zero,
+            bottomRight: isLast ? const Radius.circular(12) : Radius.zero,
+          ),
+          border: Border.all(
+            color: checked
+                ? const Color(0xFFE64A19).withAlpha(80)
+                : Colors.white.withAlpha(15),
+            width: 0.5,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              // Custom checkbox
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: checked
+                      ? const Color(0xFFE64A19)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(5),
+                  border: Border.all(
+                    color: checked
+                        ? const Color(0xFFE64A19)
+                        : Colors.white24,
+                    width: 1.5,
+                  ),
+                ),
+                child: checked
+                    ? const Icon(Icons.check, size: 13, color: Colors.white)
+                    : null,
+              ),
+              const SizedBox(width: 12),
               Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 24),
-                  itemCount: sortedCodes.length,
-                  itemBuilder: (_, i) {
-                    final code = sortedCodes[i];
-                    final name = _states[code]!;
-                    final checked = _selected.contains(code);
-                    return CheckboxListTile(
-                      value: checked,
-                      onChanged: (_) => _toggle(code),
-                      title: Text(
-                        name,
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                      subtitle: Text(
-                        code,
-                        style: const TextStyle(
-                            color: Colors.white38, fontSize: 12),
-                      ),
-                      checkColor: Colors.white,
-                      activeColor: const Color(0xFFE64A19),
-                      side: const BorderSide(color: Colors.white24),
-                    );
-                  },
+                child: Text(
+                  name,
+                  style: TextStyle(
+                    color: checked ? Colors.white : Colors.white70,
+                    fontSize: 14,
+                    fontWeight:
+                        checked ? FontWeight.w500 : FontWeight.normal,
+                  ),
+                ),
+              ),
+              Text(
+                code,
+                style: TextStyle(
+                  color: checked
+                      ? const Color(0xFFE64A19).withAlpha(200)
+                      : Colors.white24,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],

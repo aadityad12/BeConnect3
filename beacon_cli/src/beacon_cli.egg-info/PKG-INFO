@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: beacon-cli
+Version: 0.1.0
+Summary: Cross-platform BLE beacon CLI for BeConnect (macOS + Windows)
+Requires-Python: >=3.10
+Requires-Dist: bless>=0.2.2

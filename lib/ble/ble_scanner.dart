@@ -36,7 +36,12 @@ class BleScanner {
   static BeaconInfo? _parseResult(ScanResult r) {
     final hasService = r.advertisementData.serviceUuids
         .any((g) => g == Guid(serviceUuid));
-    if (!hasService) return null;
+    // Fallback: accept by device name when iOS doesn't report serviceUuids
+    // (macOS CoreBluetooth peripherals sometimes advertise UUID in overflow area).
+    final advName = r.advertisementData.advName;
+    final platformName = r.device.platformName;
+    final hasBeaconName = advName == 'BeConnect' || platformName == 'BeConnect';
+    if (!hasService && !hasBeaconName) return null;
 
     final mfData = r.advertisementData.manufacturerData;
     String severity = 'Unknown';
@@ -100,8 +105,10 @@ class BleScanner {
       _beaconsController.add(List.of(_beacons.values));
     });
 
+    // Do NOT pass withServices here: on iOS the hardware filter can strip
+    // serviceUuids from the delivered advertisement data, causing the software
+    // filter below to drop every result. Scan all devices and filter in code.
     await FlutterBluePlus.startScan(
-      withServices: [Guid(serviceUuid)],
       timeout: const Duration(seconds: 30),
     );
   }
@@ -149,7 +156,6 @@ class BleScanner {
     });
 
     await FlutterBluePlus.startScan(
-      withServices: [Guid(serviceUuid)],
       timeout: timeout,
     );
     await sub.cancel();
