@@ -37,6 +37,8 @@ dependencies {
     implementation "androidx.core:core-ktx:1.15.0"
     // Force a consistent Kotlin version for all dependencies
     implementation "org.jetbrains.kotlin:kotlin-stdlib:2.1.0"
+    // ML Kit Translation (offline, model downloaded on first use)
+    implementation "com.google.mlkit:translate:17.0.3"
 }
 
 flutter {

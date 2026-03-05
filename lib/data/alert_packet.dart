@@ -16,6 +16,8 @@ class AlertPacket {
   final bool pinned;
   @JsonKey(defaultValue: 0)
   final int hopCount; // 0 = originated here; +1 per BLE relay hop
+  @JsonKey(defaultValue: null)
+  final int? sentAt; // NWS-issued time (Unix epoch seconds); null for BLE-relayed alerts
 
   const AlertPacket({
     required this.alertId,
@@ -28,6 +30,7 @@ class AlertPacket {
     required this.fetchedAt,
     this.pinned = false,
     this.hopCount = 0,
+    this.sentAt,
   });
 
   factory AlertPacket.fromJson(Map<String, dynamic> json) =>

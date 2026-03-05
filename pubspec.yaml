@@ -39,6 +39,7 @@ dependencies:
   permission_handler: ^11.3.0
   crypto: ^3.0.3
   flutter_tts: ^4.0.2
+  shared_preferences: ^2.3.0
 
 dev_dependencies:
   flutter_test:

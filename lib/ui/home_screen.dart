@@ -12,6 +12,7 @@ import '../network/alert_fetcher.dart';
 import '../service/gateway_background_service.dart';
 import '../utils/permissions.dart';
 import 'receiver/alert_detail_screen.dart';
+import 'settings_screen.dart';
 import 'theme/severity_colors.dart';
 import 'widgets/glass_container.dart';
 import 'widgets/glass_scaffold.dart';
@@ -27,6 +28,7 @@ class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   final _dao = AlertDao();
   List<AlertPacket> _alerts = [];
+  List<String> _selectedStates = [];
   bool _loading = false;   // NWS fetch in progress
   bool _scanning = false;  // foreground BLE scan in progress
   bool _meshActive = false;
@@ -74,10 +76,13 @@ class _HomeScreenState extends State<HomeScreen>
       if (!_meshPulseCtrl.isAnimating) _meshPulseCtrl.repeat(reverse: true);
     }
 
-    // 5. Load whatever alerts are already in the local DB.
+    // 5. Load saved state filter preferences.
+    _selectedStates = await loadSelectedStates();
+
+    // 6. Load whatever alerts are already in the local DB.
     await _loadAlerts();
 
-    // 6. Kick off an immediate foreground scan so the user doesn't have to
+    // 7. Kick off an immediate foreground scan so the user doesn't have to
     //    wait up to 5 minutes for the background service to discover the Pi.
     if (granted && mounted) _runForegroundScan();
   }
@@ -231,13 +236,17 @@ class _HomeScreenState extends State<HomeScreen>
 
   // ── NWS / Demo actions ──────────────────────────────────────────────────────
 
+  Future<void> _reloadStates() async {
+    _selectedStates = await loadSelectedStates();
+  }
+
   Future<void> _fetchNws() async {
     setState(() {
       _loading = true;
       _fetchError = null;
     });
     try {
-      final fetched = await AlertFetcher().fetchAlerts();
+      final fetched = await AlertFetcher().fetchAlerts(states: _selectedStates);
       if (fetched.isEmpty) {
         if (mounted) setState(() => _fetchError = 'No active NWS alerts right now.');
         return;
@@ -339,6 +348,17 @@ class _HomeScreenState extends State<HomeScreen>
                   icon: const Icon(Icons.science),
                   tooltip: 'Load Demo Alerts',
                   onPressed: _loadDemo,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.settings),
+                  tooltip: 'Settings',
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const SettingsScreen()),
+                    ).then((_) => _reloadStates());
+                  },
                 ),
               ],
             ),
@@ -687,6 +707,13 @@ class _AlertCardState extends State<_AlertCard> with TickerProviderStateMixin {
   }
 
   String _formatAge() {
+    final sentAt = widget.alert.sentAt;
+    if (sentAt != null) {
+      final dt = DateTime.fromMillisecondsSinceEpoch(sentAt * 1000);
+      return '${dt.month}/${dt.day} '
+          '${dt.hour.toString().padLeft(2, '0')}:'
+          '${dt.minute.toString().padLeft(2, '0')}';
+    }
     final age =
         DateTime.now().millisecondsSinceEpoch ~/ 1000 - widget.alert.fetchedAt;
     if (age < 60) return '${age}s ago';

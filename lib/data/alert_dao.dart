@@ -19,6 +19,7 @@ class AlertDao {
         'fetchedAt':    alert.fetchedAt,
         'pinned':       alert.pinned ? 1 : 0,
         'hopCount':     alert.hopCount,
+        'sentAt':       alert.sentAt,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -58,6 +59,7 @@ class AlertDao {
               fetchedAt:    row['fetchedAt'] as int,
               pinned:       (row['pinned'] as int? ?? 0) == 1,
               hopCount:     row['hopCount'] as int? ?? 0,
+              sentAt:       row['sentAt'] as int?,
             ))
         .toList();
   }

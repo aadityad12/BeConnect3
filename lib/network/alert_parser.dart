@@ -27,6 +27,10 @@ class AlertParser {
     final expires = expiresStr.isNotEmpty
         ? DateTime.parse(expiresStr).millisecondsSinceEpoch ~/ 1000
         : 0;
+    final sentStr = props['sent'] as String?;
+    final sentAt = sentStr != null && sentStr.isNotEmpty
+        ? DateTime.parse(sentStr).toUtc().millisecondsSinceEpoch ~/ 1000
+        : null;
     final sourceUrl = props['@id'] as String? ?? '';
     final instructions =
         props['instruction'] as String? ?? 'No specific instructions.';
@@ -45,6 +49,7 @@ class AlertParser {
       sourceUrl:    sourceUrl,
       verified:     true,
       fetchedAt:    DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      sentAt:       sentAt,
     );
   }
 }

@@ -1,11 +1,45 @@
 import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import '../../data/alert_packet.dart';
+import '../../services/translation_service.dart';
 import '../theme/severity_colors.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/glass_scaffold.dart';
+
+// ─── Language choice ──────────────────────────────────────────────────────────
+
+class _LangChoice {
+  final String label;
+  final String? langCode;   // null = original (no translation)
+  final String ttsBcp47;    // BCP-47 locale for flutter_tts
+
+  const _LangChoice(this.label, this.langCode, this.ttsBcp47);
+}
+
+const _languages = [
+  _LangChoice('Original (English)', null, 'en-US'),
+  _LangChoice('Spanish', 'es', 'es-ES'),
+  _LangChoice('French', 'fr', 'fr-FR'),
+  _LangChoice('German', 'de', 'de-DE'),
+  _LangChoice('Chinese (Simplified)', 'zh', 'zh-CN'),
+  _LangChoice('Japanese', 'ja', 'ja-JP'),
+  _LangChoice('Korean', 'ko', 'ko-KR'),
+  _LangChoice('Portuguese', 'pt', 'pt-BR'),
+  _LangChoice('Arabic', 'ar', 'ar-SA'),
+  _LangChoice('Russian', 'ru', 'ru-RU'),
+  _LangChoice('Vietnamese', 'vi', 'vi-VN'),
+  _LangChoice('Italian', 'it', 'it-IT'),
+  _LangChoice('Dutch', 'nl', 'nl-NL'),
+  _LangChoice('Turkish', 'tr', 'tr-TR'),
+  _LangChoice('Ukrainian', 'uk', 'uk-UA'),
+  _LangChoice('Indonesian', 'id', 'id-ID'),
+  _LangChoice('Polish', 'pl', 'pl-PL'),
+];
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
 
 class AlertDetailScreen extends StatefulWidget {
   final AlertPacket alert;
@@ -20,16 +54,40 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
   late final FlutterTts _tts;
   bool _isSpeaking = false;
 
+  _LangChoice _selectedLang = _languages.first;
+  bool _translating = false;
+  String? _translatedText;
+  // null = still loading, empty = none downloaded
+  List<_LangChoice>? _availableLanguages;
+
   @override
   void initState() {
     super.initState();
     _initTts();
+    _loadAvailableLanguages();
+  }
+
+  Future<void> _loadAvailableLanguages() async {
+    final downloaded = await TranslationService.getDownloadedLanguages();
+    final filtered = [
+      _languages.first, // always include "Original"
+      ..._languages.where((l) => l.langCode != null && downloaded.contains(l.langCode)),
+    ];
+    if (mounted) {
+      setState(() {
+        _availableLanguages = filtered;
+        // Reset to "Original" if current selection is no longer available
+        if (!filtered.contains(_selectedLang)) {
+          _selectedLang = filtered.first;
+          _translatedText = null;
+        }
+      });
+    }
   }
 
   Future<void> _initTts() async {
     _tts = FlutterTts();
     await _tts.setLanguage('en-US');
-    // Slightly slower than default for clarity during emergencies.
     await _tts.setSpeechRate(Platform.isIOS ? 0.45 : 0.45);
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.0);
@@ -48,15 +106,48 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
     });
   }
 
-  /// Builds the spoken string: severity + headline + instructions.
+  String get _displayText => _translatedText ?? widget.alert.instructions;
+
   String get _speechText =>
       '${widget.alert.severity} alert. ${widget.alert.headline}. '
-      'Instructions: ${widget.alert.instructions}';
+      'Instructions: $_displayText';
+
+  Future<void> _onLanguageChanged(_LangChoice choice) async {
+    if (_isSpeaking) await _tts.stop();
+    setState(() {
+      _selectedLang = choice;
+      _translatedText = null;
+    });
+
+    if (choice.langCode == null) return;
+
+    setState(() => _translating = true);
+    try {
+      final translated = await TranslationService.translate(
+        widget.alert.instructions,
+        choice.langCode!,
+      );
+      if (mounted) setState(() => _translatedText = translated);
+    } on PlatformException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message ?? 'Translation failed'),
+            backgroundColor: Colors.red.shade800,
+          ),
+        );
+        setState(() => _selectedLang = _languages.first);
+      }
+    } finally {
+      if (mounted) setState(() => _translating = false);
+    }
+  }
 
   Future<void> _toggleSpeech() async {
     if (_isSpeaking) {
       await _tts.stop();
     } else {
+      await _tts.setLanguage(_selectedLang.ttsBcp47);
       await _tts.speak(_speechText);
     }
   }
@@ -75,10 +166,20 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
         '${dt.minute.toString().padLeft(2, '0')} local';
   }
 
+  String? _formatSentAt() {
+    final sentAt = widget.alert.sentAt;
+    if (sentAt == null) return null;
+    final dt = DateTime.fromMillisecondsSinceEpoch(sentAt * 1000);
+    return '${dt.month}/${dt.day} '
+        '${dt.hour.toString().padLeft(2, '0')}:'
+        '${dt.minute.toString().padLeft(2, '0')} local';
+  }
+
   @override
   Widget build(BuildContext context) {
     final alert = widget.alert;
     final color = SeverityColors.main(alert.severity);
+    final issuedStr = _formatSentAt();
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -97,7 +198,6 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
               elevation: 0,
               iconTheme: const IconThemeData(color: Colors.white),
               actions: [
-                // Quick TTS toggle in the AppBar for one-tap access.
                 IconButton(
                   icon: Icon(
                     _isSpeaking ? Icons.stop_circle_outlined : Icons.volume_up,
@@ -178,8 +278,7 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
               // Expires
               Row(
                 children: [
-                  const Icon(Icons.schedule,
-                      size: 16, color: Colors.white60),
+                  const Icon(Icons.schedule, size: 16, color: Colors.white60),
                   const SizedBox(width: 4),
                   Text(
                     'Expires: ${_formatExpiry()}',
@@ -187,9 +286,18 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 6),
 
-              // ── Read Aloud button ──────────────────────────────────────
+              // Language dropdown
+              _LanguageDropdown(
+                selected: _selectedLang,
+                languages: _availableLanguages,
+                translating: _translating,
+                onChanged: _onLanguageChanged,
+              ),
+              const SizedBox(height: 12),
+
+              // Read Aloud button
               _ReadAloudButton(
                 isSpeaking: _isSpeaking,
                 color: color,
@@ -207,11 +315,20 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                     fontSize: 16),
               ),
               const SizedBox(height: 10),
-              Text(
-                alert.instructions,
-                style: const TextStyle(
-                    color: Color(0xDEFFFFFF), fontSize: 15, height: 1.5),
-              ),
+              if (_translating)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: CircularProgressIndicator(
+                        color: Colors.white54, strokeWidth: 2),
+                  ),
+                )
+              else
+                Text(
+                  _displayText,
+                  style: const TextStyle(
+                      color: Color(0xDEFFFFFF), fontSize: 15, height: 1.5),
+                ),
               const Divider(height: 32),
 
               // Hop count visualiser
@@ -225,6 +342,8 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                     ? 'National Weather Service'
                     : 'Demo Data',
               ),
+              if (issuedStr != null)
+                _MetaRow(label: 'Issued', value: issuedStr),
               _MetaRow(
                 label: 'Alert ID',
                 value: alert.alertId,
@@ -236,6 +355,104 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─── Language dropdown ────────────────────────────────────────────────────────
+
+class _LanguageDropdown extends StatelessWidget {
+  final _LangChoice selected;
+  /// null while loading; list of available (downloaded) choices once ready.
+  final List<_LangChoice>? languages;
+  final bool translating;
+  final ValueChanged<_LangChoice> onChanged;
+
+  const _LanguageDropdown({
+    required this.selected,
+    required this.languages,
+    required this.translating,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Still checking what's downloaded
+    if (languages == null) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withAlpha(15),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: const Row(
+          children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(color: Colors.white38, strokeWidth: 2),
+            ),
+            SizedBox(width: 10),
+            Text('Loading languages…',
+                style: TextStyle(color: Colors.white38, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    // Only "Original" available — no languages downloaded yet
+    if (languages!.length <= 1) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withAlpha(15),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.language, color: Colors.white24, size: 16),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'No translation languages downloaded.\nAdd them in Settings → General → Language & Region → Translation Languages.',
+                style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.4),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(15),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: DropdownButton<_LangChoice>(
+        value: selected,
+        isExpanded: true,
+        dropdownColor: const Color(0xFF1A1040),
+        underline: const SizedBox.shrink(),
+        icon: translating
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                    color: Colors.white54, strokeWidth: 2))
+            : const Icon(Icons.language, color: Colors.white54, size: 20),
+        style: const TextStyle(color: Colors.white, fontSize: 14),
+        items: languages!
+            .map((l) => DropdownMenuItem(
+                  value: l,
+                  child: Text(l.label),
+                ))
+            .toList(),
+        onChanged: translating ? null : (v) => v != null ? onChanged(v) : null,
       ),
     );
   }
@@ -362,8 +579,6 @@ class _HopCountRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Build a chain of nodes: origin → hop 1 → hop 2 → … → this device.
-    // Cap the visual chain at 7 nodes so it always fits on screen.
     final totalNodes = hopCount + 1;
     final displayNodes = totalNodes.clamp(1, 7);
     final truncated = totalNodes > 7;

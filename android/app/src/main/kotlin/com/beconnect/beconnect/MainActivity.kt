@@ -15,6 +15,10 @@ import android.os.Bundle
 import android.os.ParcelUuid
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.TranslatorOptions
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -26,6 +30,7 @@ class MainActivity : FlutterActivity() {
         private const val TAG = "BeConnectNative"
         private const val CHANNEL_ID = "beconnect_bg_channel"
         private const val CHANNEL = "com.beconnect.beconnect/ble"
+        private const val TRANSLATION_CHANNEL = "com.beconnect.beconnect/translation"
         private val SERVICE_UUID   = UUID.fromString("0000BCBC-0000-1000-8000-00805F9B34FB")
         private val ALERT_CHAR_UUID   = UUID.fromString("0000BCB1-0000-1000-8000-00805F9B34FB")
         private val CONTROL_CHAR_UUID = UUID.fromString("0000BCB2-0000-1000-8000-00805F9B34FB")
@@ -72,6 +77,44 @@ class MainActivity : FlutterActivity() {
                     "stopAdvertising" -> stopGateway(result)
                     else -> result.notImplemented()
                 }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TRANSLATION_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "translate") {
+                    val text = call.argument<String>("text") ?: ""
+                    val targetCode = call.argument<String>("targetLanguage") ?: ""
+                    translateText(text, targetCode, result)
+                } else {
+                    result.notImplemented()
+                }
+            }
+    }
+
+    private fun translateText(text: String, targetCode: String, result: MethodChannel.Result) {
+        val mlkitCode = TranslateLanguage.fromLanguageTag(targetCode)
+        if (mlkitCode == null) {
+            result.error("UNSUPPORTED", "Unsupported language: $targetCode", null)
+            return
+        }
+        val options = TranslatorOptions.Builder()
+            .setSourceLanguage(TranslateLanguage.ENGLISH)
+            .setTargetLanguage(mlkitCode)
+            .build()
+        val translator = Translation.getClient(options)
+        val conditions = DownloadConditions.Builder().build()
+        translator.downloadModelIfNeeded(conditions)
+            .continueWithTask { task ->
+                if (!task.isSuccessful) throw task.exception!!
+                translator.translate(text)
+            }
+            .addOnSuccessListener { translated ->
+                result.success(translated)
+                translator.close()
+            }
+            .addOnFailureListener { e ->
+                result.error("TRANSLATION_ERROR", e.message, null)
+                translator.close()
             }
     }
 

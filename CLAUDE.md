@@ -93,6 +93,7 @@ json_annotation: ^4.9.0
 flutter_background_service: ^5.0.5  # Background BLE mesh loop
 permission_handler: ^11.3.0
 crypto: ^3.0.3                      # SHA-1 for alertId generation
+flutter_tts: ^4.0.2                 # Text-to-speech in AlertDetailScreen
 ```
 
 ## Critical Architectural Constraint: Two Flutter Engines

@@ -1,6 +1,8 @@
 import Flutter
 import UIKit
 import CoreBluetooth
+import SwiftUI
+import Translation
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -20,6 +22,9 @@ import CoreBluetooth
 
     private let payloadSize = 508  // 512 MTU - 4 header bytes
 
+    // Retains the hidden SwiftUI hosting controller used for translation
+    private var _translationHC: UIHostingController<AnyView>?
+
     // MARK: – AppDelegate lifecycle
 
     override func application(
@@ -32,6 +37,7 @@ import CoreBluetooth
             return super.application(application, didFinishLaunchingWithOptions: launchOptions)
         }
 
+        // MARK: BLE channel
         let bleChannel = FlutterMethodChannel(
             name: "com.beconnect.beconnect/ble",
             binaryMessenger: controller.binaryMessenger
@@ -57,13 +63,100 @@ import CoreBluetooth
             }
         }
 
+        // MARK: Translation channel
+        let translationChannel = FlutterMethodChannel(
+            name: "com.beconnect.beconnect/translation",
+            binaryMessenger: controller.binaryMessenger
+        )
+
+        translationChannel.setMethodCallHandler { [weak self] call, result in
+            switch call.method {
+            case "translate":
+                guard let args = call.arguments as? [String: Any],
+                      let text = args["text"] as? String,
+                      let targetLanguage = args["targetLanguage"] as? String else {
+                    result(FlutterError(code: "INVALID_ARGS", message: nil, details: nil))
+                    return
+                }
+                if #available(iOS 18.0, *) {
+                    self?.performTranslation(text: text, targetLanguage: targetLanguage, result: result)
+                } else {
+                    result(FlutterError(code: "UNSUPPORTED",
+                                        message: "Translation requires iOS 18.0+",
+                                        details: nil))
+                }
+
+            case "getDownloadedLanguages":
+                if #available(iOS 18.0, *) {
+                    Task {
+                        let codes = await self?.downloadedLanguageCodes() ?? []
+                        DispatchQueue.main.async { result(codes) }
+                    }
+                } else {
+                    result([String]())
+                }
+
+            default:
+                result(FlutterMethodNotImplemented)
+            }
+        }
+
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    }
+
+    // MARK: – Translation (iOS 18.0+)
+
+    @available(iOS 18.0, *)
+    private func downloadedLanguageCodes() async -> [String] {
+        let candidates = ["es", "fr", "de", "zh", "ja", "ko", "pt", "ar",
+                          "ru", "vi", "it", "nl", "tr", "uk", "id", "pl"]
+        let availability = LanguageAvailability()
+        let english = Locale.Language(identifier: "en")
+        var installed: [String] = []
+        for code in candidates {
+            let target = Locale.Language(identifier: code)
+            let status = await availability.status(from: english, to: target)
+            if status == .installed {
+                installed.append(code)
+            }
+        }
+        return installed
+    }
+
+    @available(iOS 18.0, *)
+    private func performTranslation(text: String, targetLanguage: String, result: @escaping FlutterResult) {
+        let config = TranslationSession.Configuration(
+            source: Locale.Language(identifier: "en"),
+            target: Locale.Language(identifier: targetLanguage)
+        )
+
+        // The Translation framework requires a SwiftUI view with .translationTask
+        // to obtain a TranslationSession. We host a hidden 0×0 view briefly.
+        let view = _TranslationHelperView(text: text, configuration: config) { [weak self] outcome in
+            DispatchQueue.main.async {
+                self?._translationHC?.view.removeFromSuperview()
+                self?._translationHC = nil
+                switch outcome {
+                case .success(let translated):
+                    result(translated)
+                case .failure(let error):
+                    result(FlutterError(code: "TRANSLATION_ERROR",
+                                        message: error.localizedDescription,
+                                        details: nil))
+                }
+            }
+        }
+
+        let hc = UIHostingController(rootView: AnyView(view))
+        _translationHC = hc
+        hc.view.frame = .zero
+        hc.view.alpha = 0
+        window?.addSubview(hc.view)
     }
 
     // MARK: – Gateway start / stop
 
     private func startGateway(alertBytes: [UInt8], severityByte: UInt8) {
-        // alertBytes arrives pre-compressed (gzip) from Dart — no UTF-8 conversion needed.
         let total = Int(ceil(Double(alertBytes.count) / Double(payloadSize)))
 
         alertChunks = (0 ..< max(total, 1)).map { i in
@@ -160,5 +253,30 @@ extension AppDelegate: CBPeripheralManagerDelegate {
         }
         request.value = frame.subdata(in: request.offset ..< frame.count)
         peripheral.respond(to: request, withResult: .success)
+    }
+}
+
+// MARK: – SwiftUI helper for Translation framework (iOS 18.0+)
+
+@available(iOS 18.0, *)
+private struct _TranslationHelperView: View {
+    let text: String
+    let configuration: TranslationSession.Configuration
+    let completion: (Result<String, Error>) -> Void
+
+    @State private var done = false
+
+    var body: some View {
+        Color.clear.frame(width: 0, height: 0)
+            .translationTask(configuration) { session in
+                guard !done else { return }
+                done = true
+                do {
+                    let response = try await session.translate(text)
+                    completion(.success(response.targetText))
+                } catch {
+                    completion(.failure(error))
+                }
+            }
     }
 }

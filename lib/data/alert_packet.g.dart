@@ -17,6 +17,7 @@ AlertPacket _$AlertPacketFromJson(Map<String, dynamic> json) => AlertPacket(
       fetchedAt: (json['fetchedAt'] as num).toInt(),
       pinned: json['pinned'] as bool? ?? false,
       hopCount: (json['hopCount'] as num?)?.toInt() ?? 0,
+      sentAt: (json['sentAt'] as num?)?.toInt(),
     );
 
 Map<String, dynamic> _$AlertPacketToJson(AlertPacket instance) =>
@@ -31,4 +32,5 @@ Map<String, dynamic> _$AlertPacketToJson(AlertPacket instance) =>
       'fetchedAt': instance.fetchedAt,
       'pinned': instance.pinned,
       'hopCount': instance.hopCount,
+      'sentAt': instance.sentAt,
     };
